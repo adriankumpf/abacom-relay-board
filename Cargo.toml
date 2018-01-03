@@ -1,0 +1,7 @@
+[package]
+name = "abacom-ch341a-relay-board"
+version = "0.1.0"
+authors = ["Adrian Kumpf <adrian.kumpf@posteo.de>"]
+
+[dependencies]
+libusb = { git = "https://github.com/adriankumpf/libusb-rs" }
