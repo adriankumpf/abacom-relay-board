@@ -5,6 +5,8 @@ mod helper;
 const USB_RELAYBOARD_VENDOR_ID: u16 = 0x1a86;
 const USB_RELAYBOARD_PRODUCT_ID: u16 = 0x5512;
 
+type RelayBoards = Vec<RelayBoard>;
+
 #[derive(Debug, PartialEq)]
 pub struct RelayBoard {
     port: u8,
@@ -37,13 +39,11 @@ impl RelayBoard {
     }
 }
 
-pub fn list_relay_boards() -> Result<Vec<RelayBoard>, libusb::Error> {
+pub fn list_relay_boards() -> libusb::Result<RelayBoards> {
     let context = libusb::Context::new()?;
     let devices = context.devices()?;
-
-    let relay_boards: Vec<RelayBoard> = devices.iter().filter_map(RelayBoard::from).collect();
-
-    Ok(relay_boards)
+    let boards = devices.iter().filter_map(RelayBoard::from).collect();
+    Ok(boards)
 }
 
 #[cfg(test)]
