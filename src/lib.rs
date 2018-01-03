@@ -1,9 +1,11 @@
 extern crate libusb;
 
+mod helper;
+
 const USB_RELAYBOARD_VENDOR_ID: u16 = 0x1a86;
 const USB_RELAYBOARD_PRODUCT_ID: u16 = 0x5512;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct RelayBoard {
     port: u8,
     bus: u8,
@@ -11,7 +13,11 @@ pub struct RelayBoard {
 }
 
 impl RelayBoard {
-    fn from(device: libusb::Device) -> Option<Self> {
+    fn from<C, D>(device: D) -> Option<Self>
+    where
+        C: helper::DeviceDescriptor,
+        D: helper::Device<C>,
+    {
         device
             .device_descriptor()
             .and_then(|device_desc| {
@@ -38,4 +44,53 @@ pub fn list_relay_boards() -> Result<Vec<RelayBoard>, libusb::Error> {
     let relay_boards: Vec<RelayBoard> = devices.iter().filter_map(RelayBoard::from).collect();
 
     Ok(relay_boards)
+}
+
+#[cfg(test)]
+mod tests {
+    use libusb;
+    use super::*;
+    use helper::tests::TestDevice;
+
+    #[test]
+    fn relay_board_from_device_success() {
+        let device = TestDevice {
+            vendor_id: 0x1a86,
+            product_id: 0x5512,
+            addr: 110,
+            bus: 220,
+            port: 330,
+        };
+
+        assert_eq!(
+            RelayBoard::from(device),
+            Some(RelayBoard {
+                addr: 110,
+                bus: 220,
+                port: 330,
+            })
+        )
+    }
+
+    fn relay_board_from_device_none() {
+        let device = TestDevice {
+            vendor_id: 0x0000,
+            product_id: 0x5512,
+            addr: 0,
+            bus: 0,
+            port: 0,
+        };
+
+        assert_eq!(RelayBoard::from(device), None);
+
+        let device = TestDevice {
+            vendor_id: 0x1a86,
+            product_id: 0x0000,
+            addr: 0,
+            bus: 0,
+            port: 0,
+        };
+
+        assert_eq!(RelayBoard::from(device), None);
+    }
 }
