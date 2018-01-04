@@ -61,7 +61,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "libusb"
 version = "0.3.0"
-source = "git+https://github.com/adriankumpf/libusb-rs#f0723285e05157c0d1e669b16bcaa60803da0835"
+source = "git+https://github.com/adriankumpf/libusb-rs#9a30f0b5d288c15a3e1c851e2cc081fb9eeaba45"
 dependencies = [
  "bit-set 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.34 (registry+https://github.com/rust-lang/crates.io-index)",
