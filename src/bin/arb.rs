@@ -6,10 +6,13 @@ extern crate libusb;
 
 use std::io::{self, Write};
 use std::process;
-use clap::{App, Arg, ArgMatches};
+use clap::{App, Arg};
 
-fn parse_args<'a>() -> ArgMatches<'a> {
-    App::new("abacom-relay-board")
+type Port = u8;
+type Relays = Vec<u8>;
+
+fn parse_args<'a>() -> (Option<Port>, Relays) {
+    let matches = App::new("abacom-relay-board")
         .author("Adrian K. <adrian.kumpf@posteo.de>")
         .version(crate_version!())
         .arg(
@@ -24,20 +27,22 @@ fn parse_args<'a>() -> ArgMatches<'a> {
             Arg::with_name("RELAYS")
                 .help("Sets the relays to activate")
                 .required(true)
-                .max_values(8)
                 .possible_values(&["0", "1", "2", "3", "4", "5", "6", "7", "8"])
                 .multiple(true)
                 .index(1),
         )
-        .get_matches()
-}
-
-fn run_app() -> abacom_relay_board::Result<()> {
-    let matches = parse_args();
+        .get_matches();
 
     let port = value_t!(matches, "port", u8).ok();
-    let relays = values_t!(matches, "RELAYS", u8).unwrap();
+    let mut relays = values_t!(matches, "RELAYS", u8).unwrap();
 
+    relays.dedup();
+
+    (port, relays)
+}
+
+fn run_app() -> abacom_relay_board::Result {
+    let (port, relays) = parse_args();
     abacom_relay_board::switch_relays(relays, port)
 }
 

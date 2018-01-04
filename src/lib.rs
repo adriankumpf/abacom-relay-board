@@ -5,8 +5,7 @@ mod errors;
 
 use traits::{Device, DeviceDescriptor};
 
-pub use errors::Error;
-pub use errors::Result;
+pub use errors::{Error, Result};
 
 const VENDOR_ID: u16 = 0x2109; // 0x1a86;
 const PRODUCT_ID: u16 = 0x0100; // 0x5512;
@@ -14,10 +13,10 @@ const PRODUCT_ID: u16 = 0x0100; // 0x5512;
 type RelayBoards = Vec<RelayBoard>;
 
 #[derive(Debug, PartialEq)]
-pub struct RelayBoard {
-    pub port: u8,
-    pub bus: u8,
-    pub addr: u8,
+struct RelayBoard {
+    port: u8,
+    bus: u8,
+    addr: u8,
 }
 
 impl RelayBoard {
@@ -44,7 +43,7 @@ impl RelayBoard {
             })
             .ok()
     }
-    pub fn activate<'a>(&self, _relays: Vec<u8>) -> Result<()> {
+    pub fn activate<'a>(&self, _relays: Vec<u8>) -> Result {
         Ok(())
     }
 }
@@ -56,7 +55,7 @@ fn get_relay_boards() -> Result<RelayBoards> {
     Ok(boards)
 }
 
-fn do_switch_relays(relay_boards: RelayBoards, relays: Vec<u8>, port: Option<u8>) -> Result<()> {
+fn do_switch_relays(relay_boards: RelayBoards, relays: Vec<u8>, port: Option<u8>) -> Result {
     match relay_boards.len() {
         0 => Err(Error::NotFound),
         1 => relay_boards[0].activate(relays),
@@ -70,7 +69,7 @@ fn do_switch_relays(relay_boards: RelayBoards, relays: Vec<u8>, port: Option<u8>
     }
 }
 
-pub fn switch_relays(relays: Vec<u8>, port: Option<u8>) -> Result<()> {
+pub fn switch_relays(relays: Vec<u8>, port: Option<u8>) -> Result {
     do_switch_relays(get_relay_boards()?, relays, port)
 }
 

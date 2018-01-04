@@ -4,19 +4,19 @@ use std::result::Result as StdResult;
 
 use libusb;
 
-/// A result of a function that may return a `Error`.
-pub type Result<T> = StdResult<T, Error>;
+/// A result of a function that may return an `Error`.
+pub type Result<T = ()> = StdResult<T, Error>;
 
 /// Errors returned by the `abacom_relay_board` library.
 #[derive(Debug, PartialEq)]
 pub enum Error {
-    /// Libusb Error
+    /// libusb error
     Usb(libusb::Error),
 
     /// relay board not found
     NotFound,
 
-    /// Multiple relay baords found
+    /// multiple relay baords found
     MultipleFound,
 }
 
