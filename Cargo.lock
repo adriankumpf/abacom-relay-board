@@ -3,7 +3,7 @@ name = "abacom-relay-board"
 version = "0.1.0"
 dependencies = [
  "clap 2.29.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "libusb 0.3.0 (git+https://github.com/adriankumpf/libusb-rs)",
+ "libusb 0.3.0 (git+https://github.com/adriankumpf/libusb-rs?branch=dev)",
 ]
 
 [[package]]
@@ -61,7 +61,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "libusb"
 version = "0.3.0"
-source = "git+https://github.com/adriankumpf/libusb-rs#9a30f0b5d288c15a3e1c851e2cc081fb9eeaba45"
+source = "git+https://github.com/adriankumpf/libusb-rs?branch=dev#19d26c44eebd4a8d4a9332bca2c00ca83c75fb6c"
 dependencies = [
  "bit-set 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.34 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -155,7 +155,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum bitflags 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)" = "b3c30d3802dfb7281680d6285f2ccdaa8c2d8fee41f93805dba5c4cf50dc23cf"
 "checksum clap 2.29.0 (registry+https://github.com/rust-lang/crates.io-index)" = "110d43e343eb29f4f51c1db31beb879d546db27998577e5715270a54bcf41d3f"
 "checksum libc 0.2.34 (registry+https://github.com/rust-lang/crates.io-index)" = "36fbc8a8929c632868295d0178dd8f63fc423fd7537ad0738372bd010b3ac9b0"
-"checksum libusb 0.3.0 (git+https://github.com/adriankumpf/libusb-rs)" = "<none>"
+"checksum libusb 0.3.0 (git+https://github.com/adriankumpf/libusb-rs?branch=dev)" = "<none>"
 "checksum libusb-sys 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)" = "4c53b6582563d64ad3e692f54ef95239c3ea8069e82c9eb70ca948869a7ad767"
 "checksum pkg-config 0.3.9 (registry+https://github.com/rust-lang/crates.io-index)" = "3a8b4c6b8165cd1a1cd4b9b120978131389f64bdaf456435caa41e630edba903"
 "checksum redox_syscall 0.1.33 (registry+https://github.com/rust-lang/crates.io-index)" = "07b8f011e3254d5a9b318fde596d409a0001c9ae4c6e7907520c2eaa4d988c99"

@@ -9,7 +9,8 @@ use std::process;
 use clap::{App, Arg};
 
 type Port = u8;
-type Relays = Vec<u8>;
+type Relays = u8;
+// type Relays = Vec<u8>;
 
 fn parse_args<'a>() -> (Option<Port>, Relays) {
     let matches = App::new("abacom-relay-board")
@@ -27,16 +28,18 @@ fn parse_args<'a>() -> (Option<Port>, Relays) {
             Arg::with_name("RELAYS")
                 .help("Sets the relays to activate")
                 .required(true)
-                .possible_values(&["0", "1", "2", "3", "4", "5", "6", "7", "8"])
-                .multiple(true)
+                // .possible_values(&["0", "1", "2", "3", "4", "5", "6", "7", "8"])
+                // .multiple(true)
+                .multiple(false)
                 .index(1),
         )
         .get_matches();
 
     let port = value_t!(matches, "port", u8).ok();
-    let mut relays = values_t!(matches, "RELAYS", u8).unwrap();
+    let relays = value_t!(matches, "RELAYS", u8).unwrap();
 
-    relays.dedup();
+    // let mut relays = values_t!(matches, "RELAYS", u8).unwrap();
+    // relays.dedup();
 
     (port, relays)
 }

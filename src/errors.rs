@@ -18,6 +18,10 @@ pub enum Error {
 
     /// multiple relay baords found
     MultipleFound,
+
+    VerificationFailed,
+
+    UnsafeRead,
 }
 
 impl Error {
@@ -26,6 +30,8 @@ impl Error {
             Error::Usb(ref err) => err.description(),
             Error::NotFound => "no relay board found",
             Error::MultipleFound => "multiple relay boards found",
+            Error::VerificationFailed => "verification failed",
+            Error::UnsafeRead => "unsafe read",
         }
     }
 }
