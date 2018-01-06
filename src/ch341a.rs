@@ -8,7 +8,7 @@ use errors::{Error, Result};
 const ENDPOINT_IN: u8 = 0x02;
 const ENDPOINT_OUT: u8 = 0x82;
 const READ_BUF_SIZE: usize = 8;
-const TIMEOUT_MS: u64 = 5;
+const TIMEOUT_MS: u64 = 50;
 
 pub fn set_output(handle: &mut libusb::DeviceHandle, data: u8) -> Result {
     let msg = vec![

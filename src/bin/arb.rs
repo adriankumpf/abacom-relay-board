@@ -11,7 +11,7 @@ use clap::{App, Arg};
 type Port = u8;
 type Relays = u8;
 
-fn parse_args() -> (Relays, Option<Port>) {
+fn parse_args() -> (Relays, bool, Option<Port>) {
     let matches = App::new("abacom-relay-board")
         .author("Adrian K. <adrian.kumpf@posteo.de>")
         .version(crate_version!())
@@ -19,9 +19,14 @@ fn parse_args() -> (Relays, Option<Port>) {
             Arg::with_name("port")
                 .short("p")
                 .long("port")
-                .value_name("PORT")
                 .help("Uses a custom port")
                 .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("verify")
+                .short("v")
+                .long("verify")
+                .help("Verify the relay status after writing"),
         )
         .arg(
             Arg::with_name("RELAYS")
@@ -34,24 +39,26 @@ fn parse_args() -> (Relays, Option<Port>) {
         .get_matches();
 
     let port = value_t!(matches, "port", u8).ok();
-
+    let verify = matches.is_present("verify");
     let relays = values_t!(matches, "RELAYS", u8)
         .unwrap()
         .iter()
         .filter(|&&r| r != 0)
         .fold(0, |acc, &r| acc | 1 << (r - 1));
 
-    (relays, port)
+    (relays, verify, port)
 }
 
 fn main() {
-    let (relays, port) = parse_args();
+    let (relays, verify, port) = parse_args();
 
-    process::exit(match abacom_relay_board::switch_relays(relays, port) {
-        Ok(_) => 0,
-        Err(err) => {
-            writeln!(io::stderr(), "error: {}", err).unwrap();
-            1
-        }
-    });
+    process::exit(
+        match abacom_relay_board::switch_relays(relays, verify, port) {
+            Ok(_) => 0,
+            Err(err) => {
+                writeln!(io::stderr(), "error: {}", err).unwrap();
+                1
+            }
+        },
+    );
 }

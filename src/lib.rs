@@ -52,7 +52,7 @@ impl<'a> RelayBoard<'a> {
         Ok(handle)
     }
 
-    fn set_active_relays(&self, relays: u8) -> Result {
+    fn set_active_relays(&self, relays: u8, verify: bool) -> Result {
         let mut handle = self.open_device()?;
 
         ch341a::set_output(&mut handle, 0)?; //# Latch low
@@ -72,7 +72,7 @@ impl<'a> RelayBoard<'a> {
         ch341a::set_output(&mut handle, LATCH)?; // Latch high
         ch341a::set_output(&mut handle, 0)?; // Latch, CLK, OE low
 
-        if self.get_active_relays(handle)? != relays {
+        if verify && self.get_active_relays(handle)? != relays {
             return Err(Error::VerificationFailed);
         }
 
@@ -102,7 +102,7 @@ impl<'a> RelayBoard<'a> {
     }
 }
 
-pub fn switch_relays(relays: u8, port: Option<u8>) -> Result {
+pub fn switch_relays(relays: u8, verify: bool, port: Option<u8>) -> Result {
     let context = libusb::Context::new()?;
 
     let relay_boards: Vec<_> = context
@@ -123,5 +123,5 @@ pub fn switch_relays(relays: u8, port: Option<u8>) -> Result {
         },
     };
 
-    relay_board?.set_active_relays(relays)
+    relay_board?.set_active_relays(relays, verify)
 }
