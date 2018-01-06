@@ -22,6 +22,8 @@ pub enum Error {
     VerificationFailed,
 
     UnsafeRead,
+
+    BadDevice,
 }
 
 impl Error {
@@ -32,6 +34,7 @@ impl Error {
             Error::MultipleFound => "multiple relay boards found",
             Error::VerificationFailed => "verification failed",
             Error::UnsafeRead => "unsafe read",
+            Error::BadDevice => "bad device",
         }
     }
 }

@@ -3,7 +3,7 @@ extern crate libusb;
 mod errors;
 mod ch341a;
 
-use errors::{Error, Result};
+pub use errors::{Error, Result};
 
 const VENDOR_ID: u16 = 0x1a86;
 const PRODUCT_ID: u16 = 0x5512;
@@ -14,6 +14,7 @@ const CLK: u8 = 0x08; // to A6275 CLK in
 const DATA: u8 = 0x20; // to A6275 Serial in
 const READ: u8 = 0x80; // from A6275 Serial out
 
+#[derive(Clone)]
 struct RelayBoard<'a> {
     device: libusb::Device<'a>,
 }
@@ -75,9 +76,7 @@ impl<'a> RelayBoard<'a> {
         Ok(())
     }
 
-    fn set_active_relays(&self, relays: u8, verify: bool) -> Result {
-        let handle = self.open_device()?;
-
+    fn set_active_relays(&self, handle: libusb::DeviceHandle, relays: u8, verify: bool) -> Result {
         ch341a::set_output(&handle, 0)?; // Latch low
 
         self.shift_out_bits(&handle, relays)?;
@@ -85,14 +84,14 @@ impl<'a> RelayBoard<'a> {
         ch341a::set_output(&handle, LATCH)?; // Latch high
         ch341a::set_output(&handle, 0)?; // Latch, CLK, OE low
 
-        if verify && self.get_active_relays(handle)? != relays {
+        if verify && self.get_active_relays(&handle)? != relays {
             return Err(Error::VerificationFailed);
         }
 
         Ok(())
     }
 
-    fn get_active_relays(&self, handle: libusb::DeviceHandle) -> Result<u8> {
+    fn get_active_relays(&self, handle: &libusb::DeviceHandle) -> Result<u8> {
         let mut result = 0;
 
         ch341a::set_output(&handle, 0)?; // all lines low
@@ -113,32 +112,53 @@ impl<'a> RelayBoard<'a> {
 
         self.shift_out_bits(&handle, result)?;
 
-        println!("result {}", result);
-
         Ok(result)
     }
 }
 
-pub fn switch_relays(relays: u8, verify: bool, port: Option<u8>) -> Result {
-    let context = libusb::Context::new()?;
-
+fn find_relay_board(context: &libusb::Context, port: Option<u8>) -> Result<RelayBoard> {
     let relay_boards: Vec<_> = context
         .devices()?
         .iter()
         .filter_map(RelayBoard::from)
         .collect();
 
-    let relay_board = match relay_boards.len() {
+    match relay_boards.len() {
         0 => Err(Error::NotFound),
-        1 => Ok(&relay_boards[0]),
+        1 => Ok(relay_boards[0].clone()),
         _ => match port {
             None => Err(Error::MultipleFound),
             Some(p) => match relay_boards.iter().find(|rb| rb.get_port() == p) {
                 None => Err(Error::NotFound),
-                Some(rb) => Ok(rb),
+                Some(rb) => Ok(rb.clone()),
             },
         },
-    };
+    }
+}
 
-    relay_board?.set_active_relays(relays, verify)
+pub fn get_relays(port: Option<u8>) -> Result<u8> {
+    let context = libusb::Context::new()?;
+    let relay_board = find_relay_board(&context, port)?;
+    let handle = relay_board.open_device()?;
+
+    let old_status = relay_board.get_active_relays(&handle)?;
+    let test_status = !old_status;
+    relay_board.shift_out_bits(&handle, test_status)?;
+    let status = relay_board.get_active_relays(&handle)?;
+
+    if status != test_status {
+        return Err(Error::BadDevice);
+    }
+
+    relay_board.shift_out_bits(&handle, old_status)?;
+
+    Ok(old_status)
+}
+
+pub fn switch_relays(relays: u8, verify: bool, port: Option<u8>) -> Result {
+    let context = libusb::Context::new()?;
+    let relay_board = find_relay_board(&context, port)?;
+    let handle = relay_board.open_device()?;
+
+    relay_board.set_active_relays(handle, relays, verify)
 }

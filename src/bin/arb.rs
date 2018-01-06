@@ -11,7 +11,7 @@ use clap::{App, Arg};
 type Port = u8;
 type Relays = u8;
 
-fn parse_args() -> (Relays, bool, Option<Port>) {
+fn parse_args() -> (bool, Relays, bool, Option<Port>) {
     let matches = App::new("abacom-relay-board")
         .author("Adrian K. <adrian.kumpf@posteo.de>")
         .version(crate_version!())
@@ -23,10 +23,18 @@ fn parse_args() -> (Relays, bool, Option<Port>) {
                 .takes_value(true),
         )
         .arg(
-            Arg::with_name("verify")
-                .short("v")
-                .long("verify")
-                .help("Verify the relay status after writing"),
+            Arg::with_name("disable-verification")
+                .short("d")
+                .long("disable-verification")
+                .requires("RELAYS")
+                .help("Disables the verifaction after activating relays"),
+        )
+        .arg(
+            Arg::with_name("status")
+                .short("s")
+                .long("status")
+                .help("Get relays status")
+                .conflicts_with("RELAYS"),
         )
         .arg(
             Arg::with_name("RELAYS")
@@ -39,26 +47,47 @@ fn parse_args() -> (Relays, bool, Option<Port>) {
         .get_matches();
 
     let port = value_t!(matches, "port", u8).ok();
-    let verify = matches.is_present("verify");
+    let status = matches.is_present("status");
+    let verify = !matches.is_present("disable-verification");
     let relays = values_t!(matches, "RELAYS", u8)
         .unwrap()
         .iter()
         .filter(|&&r| r != 0)
         .fold(0, |acc, &r| acc | 1 << (r - 1));
 
-    (relays, verify, port)
+    (status, relays, verify, port)
+}
+
+fn run() -> abacom_relay_board::Result {
+    let (status, relays, verify, port) = parse_args();
+
+    if status {
+        let result = abacom_relay_board::get_relays(port)?;
+
+        let active_relays: Vec<_> = (0..8)
+            .filter_map(|m| {
+                if (1 << m) & result != 0 {
+                    Some((m + 1).to_string())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        println!("Active relays: {}", active_relays.join(" "));
+
+        Ok(())
+    } else {
+        abacom_relay_board::switch_relays(relays, verify, port)
+    }
 }
 
 fn main() {
-    let (relays, verify, port) = parse_args();
-
-    process::exit(
-        match abacom_relay_board::switch_relays(relays, verify, port) {
-            Ok(_) => 0,
-            Err(err) => {
-                writeln!(io::stderr(), "error: {}", err).unwrap();
-                1
-            }
-        },
-    );
+    process::exit(match run() {
+        Ok(_) => 0,
+        Err(err) => {
+            writeln!(io::stderr(), "error: {}", err).unwrap();
+            1
+        }
+    });
 }
