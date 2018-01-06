@@ -3,7 +3,7 @@ extern crate libusb;
 mod errors;
 mod ch341a;
 
-pub use errors::{Error, Result};
+use errors::{Error, Result};
 
 const VENDOR_ID: u16 = 0x1a86;
 const PRODUCT_ID: u16 = 0x5512;
@@ -111,15 +111,17 @@ pub fn switch_relays(relays: u8, port: Option<u8>) -> Result {
         .filter_map(RelayBoard::from)
         .collect();
 
-    match relay_boards.len() {
+    let relay_board = match relay_boards.len() {
         0 => Err(Error::NotFound),
-        1 => relay_boards[0].set_active_relays(relays),
+        1 => Ok(&relay_boards[0]),
         _ => match port {
             None => Err(Error::MultipleFound),
             Some(p) => match relay_boards.iter().find(|rb| rb.get_port() == p) {
                 None => Err(Error::NotFound),
-                Some(rb) => rb.set_active_relays(relays),
+                Some(rb) => Ok(rb),
             },
         },
-    }
+    };
+
+    relay_board?.set_active_relays(relays)
 }
