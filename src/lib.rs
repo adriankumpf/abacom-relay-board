@@ -38,8 +38,22 @@ impl<'a> RelayBoard<'a> {
         self.device.port_number()
     }
 
-    fn set_active_relays(&self, relays: u8) -> Result {
+    fn open_device(&self) -> Result<libusb::DeviceHandle> {
+        const EP_IFACE: u8 = 0;
+
         let mut handle = self.device.open()?;
+
+        if let Ok(true) = handle.kernel_driver_active(EP_IFACE) {
+            handle.detach_kernel_driver(EP_IFACE)?;
+        };
+
+        handle.claim_interface(EP_IFACE)?;
+
+        Ok(handle)
+    }
+
+    fn set_active_relays(&self, relays: u8) -> Result {
+        let mut handle = self.open_device()?;
 
         ch341a::set_output(&mut handle, 0)?; //# Latch low
 
