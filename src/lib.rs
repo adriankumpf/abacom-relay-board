@@ -52,37 +52,37 @@ impl<'a> RelayBoard<'a> {
     }
 
     fn shift_out_bits(&self, handle: &libusb::DeviceHandle, relays: u8) -> Result {
-        ch341a::set_output(&handle, 0)?; // All lines low
+        ch341a::set_output(handle, 0)?; // All lines low
 
         for i in 0..8 {
             if (relays & (1 << (7 - i))) != 0 {
                 // relay on
-                ch341a::set_output(&handle, DATA)?; // DATA high
-                ch341a::set_output(&handle, (CLK | DATA))?; // CLK high
-                ch341a::set_output(&handle, DATA)?; // CLK low
+                ch341a::set_output(handle, DATA)?; // DATA high
+                ch341a::set_output(handle, (CLK | DATA))?; // CLK high
+                ch341a::set_output(handle, DATA)?; // CLK low
             } else {
                 // relay off
-                ch341a::set_output(&handle, 0)?; // DATA low
-                ch341a::set_output(&handle, CLK)?; // CLK high
-                ch341a::set_output(&handle, 0)?; // CLK low
-                                                 // ch341a::set_output(&mut handle, 0)?; // All lines low
+                ch341a::set_output(handle, 0)?; // DATA low
+                ch341a::set_output(handle, CLK)?; // CLK high
+                ch341a::set_output(handle, 0)?; // CLK low
+                                                // ch341a::set_output(&mut handle, 0)?; // All lines low
             }
         }
 
-        ch341a::set_output(&handle, 0)?; // All lines 0
+        ch341a::set_output(handle, 0)?; // All lines 0
 
         Ok(())
     }
 
-    fn set_active_relays(&self, handle: libusb::DeviceHandle, relays: u8, verify: bool) -> Result {
-        ch341a::set_output(&handle, 0)?; // Latch low
+    fn set_active_relays(&self, handle: &libusb::DeviceHandle, relays: u8, verify: bool) -> Result {
+        ch341a::set_output(handle, 0)?; // Latch low
 
-        self.shift_out_bits(&handle, relays)?;
+        self.shift_out_bits(handle, relays)?;
 
-        ch341a::set_output(&handle, LATCH)?; // Latch high
-        ch341a::set_output(&handle, 0)?; // Latch, CLK, OE low
+        ch341a::set_output(handle, LATCH)?; // Latch high
+        ch341a::set_output(handle, 0)?; // Latch, CLK, OE low
 
-        if verify && self.get_active_relays(&handle)? != relays {
+        if verify && self.get_active_relays(handle)? != relays {
             return Err(Error::VerificationFailed);
         }
 
@@ -92,23 +92,23 @@ impl<'a> RelayBoard<'a> {
     fn get_active_relays(&self, handle: &libusb::DeviceHandle) -> Result<u8> {
         let mut result = 0;
 
-        ch341a::set_output(&handle, 0)?; // all lines low
+        ch341a::set_output(handle, 0)?; // all lines low
 
         // shift out bit 0..7 from A6275...
         for i in 0..8 {
-            let input_state = ch341a::get_input(&handle)?[0]; //Get status of CH341A D0..D7 lines
+            let input_state = ch341a::get_input(handle)?[0]; //Get status of CH341A D0..D7 lines
 
             // READ bits from A6275 Serial out (at D7 line).
             if (input_state & READ) != 0 {
-                result = result | (1 << (7 - i));
+                result |= 1 << (7 - i);
             }
 
             // generate CLK pulse for next bit from A6275
-            ch341a::set_output(&handle, CLK)?; // CLK high
-            ch341a::set_output(&handle, 0)?; // CLK low
+            ch341a::set_output(handle, CLK)?; // CLK high
+            ch341a::set_output(handle, 0)?; // CLK low
         }
 
-        self.shift_out_bits(&handle, result)?;
+        self.shift_out_bits(handle, result)?;
 
         Ok(result)
     }
@@ -158,5 +158,5 @@ pub fn switch_relays(relays: u8, verify: bool, port: Option<u8>) -> Result {
     let relay_board = find_relay_board(&context, port)?;
     let handle = relay_board.open_device()?;
 
-    relay_board.set_active_relays(handle, relays, verify)
+    relay_board.set_active_relays(&handle, relays, verify)
 }

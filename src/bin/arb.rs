@@ -4,7 +4,6 @@ extern crate abacom_relay_board;
 extern crate clap;
 extern crate libusb;
 
-use std::io::{self, Write};
 use std::process;
 use clap::{App, Arg};
 
@@ -86,7 +85,7 @@ fn main() {
     process::exit(match run() {
         Ok(_) => 0,
         Err(err) => {
-            writeln!(io::stderr(), "error: {}", err).unwrap();
+            eprintln!("error: {}", err);
             1
         }
     });
