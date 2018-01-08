@@ -20,19 +20,17 @@ struct RelayBoard<'a> {
 }
 
 impl<'a> RelayBoard<'a> {
-    fn from(device: libusb::Device<'a>) -> Option<Self> {
-        device
-            .device_descriptor()
-            .and_then(|device_desc| {
-                if device_desc.vendor_id() != VENDOR_ID || device_desc.product_id() != PRODUCT_ID {
-                    return Err(libusb::Error::Other);
+    fn from(device: libusb::Device<'a>) -> Option<RelayBoard<'a>> {
+        match device.device_descriptor() {
+            Err(_) => None,
+            Ok(dd) => {
+                if dd.vendor_id() != VENDOR_ID || dd.product_id() != PRODUCT_ID {
+                    return None;
                 };
 
-                Ok(Self {
-                    device: device.clone(),
-                })
-            })
-            .ok()
+                Some(RelayBoard { device: device })
+            }
+        }
     }
 
     fn get_port(&self) -> u8 {

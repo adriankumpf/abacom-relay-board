@@ -8,7 +8,6 @@ use errors::{Error, Result};
 const ENDPOINT_IN: u8 = 0x02;
 const ENDPOINT_OUT: u8 = 0x82;
 const READ_BUF_SIZE: usize = 32;
-const TIMEOUT_MS: u64 = 50;
 
 pub fn set_output(handle: &libusb::DeviceHandle, data: u8) -> Result {
     let msg = vec![
@@ -27,7 +26,7 @@ fn write(handle: &libusb::DeviceHandle, mut data: Vec<u8>) -> Result {
     let buf =
         unsafe { slice::from_raw_parts_mut((&mut data[..]).as_mut_ptr(), data.capacity()) };
 
-    match handle.write_bulk(ENDPOINT_IN, buf, Duration::from_millis(TIMEOUT_MS)) {
+    match handle.write_bulk(ENDPOINT_IN, buf, Duration::from_millis(100)) {
         Err(err) => Err(Error::Usb(err)),
         Ok(_len) => Ok(()),
     }
@@ -38,7 +37,7 @@ fn read(handle: &libusb::DeviceHandle) -> Result<Vec<u8>> {
     let buf =
         unsafe { slice::from_raw_parts_mut((&mut vec[..]).as_mut_ptr(), vec.capacity()) };
 
-    match handle.read_bulk(ENDPOINT_OUT, buf, Duration::from_millis(TIMEOUT_MS)) {
+    match handle.read_bulk(ENDPOINT_OUT, buf, Duration::from_millis(10)) {
         Err(err) => Err(Error::Usb(err)),
         Ok(len) => {
             if len > READ_BUF_SIZE {
