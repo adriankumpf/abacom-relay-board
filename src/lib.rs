@@ -20,17 +20,14 @@ struct RelayBoard<'a> {
 }
 
 impl<'a> RelayBoard<'a> {
-    fn from(device: libusb::Device<'a>) -> Option<RelayBoard<'a>> {
-        match device.device_descriptor() {
-            Err(_) => None,
-            Ok(dd) => {
-                if dd.vendor_id() != VENDOR_ID || dd.product_id() != PRODUCT_ID {
-                    return None;
-                };
+    fn from(device: libusb::Device<'a>) -> Result<Option<RelayBoard<'a>>> {
+        let dd = device.device_descriptor()?;
 
-                Some(RelayBoard { device: device })
-            }
-        }
+        if dd.vendor_id() != VENDOR_ID || dd.product_id() != PRODUCT_ID {
+            return Ok(None);
+        };
+
+        Ok(Some(RelayBoard { device: device }))
     }
 
     fn get_port(&self) -> u8 {
@@ -115,11 +112,13 @@ impl<'a> RelayBoard<'a> {
 }
 
 fn find_relay_board(context: &libusb::Context, port: Option<u8>) -> Result<RelayBoard> {
-    let relay_boards: Vec<_> = context
-        .devices()?
-        .iter()
-        .filter_map(RelayBoard::from)
-        .collect();
+    let mut relay_boards = vec![];
+
+    for device in context.devices()?.iter() {
+        if let Some(rb) = RelayBoard::from(device)? {
+            relay_boards.push(rb);
+        }
+    }
 
     match relay_boards.len() {
         0 => Err(Error::NotFound),
