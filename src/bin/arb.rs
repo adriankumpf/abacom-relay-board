@@ -7,10 +7,14 @@ extern crate libusb;
 use std::process;
 use clap::{App, Arg};
 
-type Port = u8;
-type Relays = u8;
+struct Args {
+    get_status: bool,
+    relays: u8,
+    verify: bool,
+    port: Option<u8>,
+}
 
-fn parse_args() -> (bool, Relays, bool, Option<Port>) {
+fn parse_args() -> Args {
     let matches = App::new("abacom-relay-board")
         .author("Adrian K. <adrian.kumpf@posteo.de>")
         .version(crate_version!())
@@ -29,7 +33,7 @@ fn parse_args() -> (bool, Relays, bool, Option<Port>) {
                 .help("Disables the verifaction after activating relays"),
         )
         .arg(
-            Arg::with_name("status")
+            Arg::with_name("get_status")
                 .short("s")
                 .long("status")
                 .help("Get relays status")
@@ -46,7 +50,7 @@ fn parse_args() -> (bool, Relays, bool, Option<Port>) {
         .get_matches();
 
     let port = value_t!(matches, "port", u8).ok();
-    let status = matches.is_present("status");
+    let get_status = matches.is_present("get_status");
     let verify = !matches.is_present("disable-verification");
     let relays = values_t!(matches, "RELAYS", u8)
         .unwrap()
@@ -54,14 +58,19 @@ fn parse_args() -> (bool, Relays, bool, Option<Port>) {
         .filter(|&&r| r != 0)
         .fold(0, |acc, &r| acc | 1 << (r - 1));
 
-    (status, relays, verify, port)
+    Args {
+        get_status,
+        relays,
+        verify,
+        port,
+    }
 }
 
 fn run() -> abacom_relay_board::Result {
-    let (status, relays, verify, port) = parse_args();
+    let args = parse_args();
 
-    if status {
-        let result = abacom_relay_board::get_relays(port)?;
+    if args.get_status {
+        let result = abacom_relay_board::get_relays(args.port)?;
 
         let active_relays: Vec<_> = (0..8)
             .filter_map(|m| {
@@ -77,7 +86,7 @@ fn run() -> abacom_relay_board::Result {
 
         Ok(())
     } else {
-        abacom_relay_board::switch_relays(relays, verify, port)
+        abacom_relay_board::switch_relays(args.relays, args.verify, args.port)
     }
 }
 

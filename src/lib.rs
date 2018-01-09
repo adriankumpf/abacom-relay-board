@@ -112,25 +112,28 @@ impl<'a> RelayBoard<'a> {
 }
 
 fn find_relay_board(context: &libusb::Context, port: Option<u8>) -> Result<RelayBoard> {
-    let mut relay_boards = vec![];
+    let mut relay_board = None;
+    let mut boards_seen = 0;
 
     for device in context.devices()?.iter() {
         if let Some(rb) = RelayBoard::from(device)? {
-            relay_boards.push(rb);
+            if let Some(port) = port {
+                if rb.get_port() != port {
+                    continue;
+                }
+            }
+
+            boards_seen += 1;
+
+            if boards_seen > 1 {
+                return Err(Error::MultipleFound);
+            }
+
+            relay_board = Some(rb);
         }
     }
 
-    match relay_boards.len() {
-        0 => Err(Error::NotFound),
-        1 => Ok(relay_boards[0].clone()),
-        _ => match port {
-            None => Err(Error::MultipleFound),
-            Some(p) => match relay_boards.iter().find(|rb| rb.get_port() == p) {
-                None => Err(Error::NotFound),
-                Some(rb) => Ok(rb.clone()),
-            },
-        },
-    }
+    relay_board.ok_or(Error::NotFound)
 }
 
 pub fn get_relays(port: Option<u8>) -> Result<u8> {
