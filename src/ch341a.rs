@@ -23,8 +23,7 @@ pub fn get_input(handle: &libusb::DeviceHandle) -> Result<Vec<u8>> {
 }
 
 fn write(handle: &libusb::DeviceHandle, mut data: Vec<u8>) -> Result {
-    let buf =
-        unsafe { slice::from_raw_parts_mut((&mut data[..]).as_mut_ptr(), data.capacity()) };
+    let buf = unsafe { slice::from_raw_parts_mut((&mut data[..]).as_mut_ptr(), data.capacity()) };
 
     match handle.write_bulk(ENDPOINT_IN, buf, Duration::from_millis(100)) {
         Err(err) => Err(Error::Usb(err)),
@@ -34,8 +33,7 @@ fn write(handle: &libusb::DeviceHandle, mut data: Vec<u8>) -> Result {
 
 fn read(handle: &libusb::DeviceHandle) -> Result<Vec<u8>> {
     let mut vec = Vec::<u8>::with_capacity(READ_BUF_SIZE);
-    let buf =
-        unsafe { slice::from_raw_parts_mut((&mut vec[..]).as_mut_ptr(), vec.capacity()) };
+    let buf = unsafe { slice::from_raw_parts_mut((&mut vec[..]).as_mut_ptr(), vec.capacity()) };
 
     match handle.read_bulk(ENDPOINT_OUT, buf, Duration::from_millis(10)) {
         Err(err) => Err(Error::Usb(err)),

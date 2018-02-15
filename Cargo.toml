@@ -5,4 +5,4 @@ authors = ["Adrian Kumpf <adrian.kumpf@posteo.de>"]
 
 [dependencies]
 libusb = { git = "https://github.com/adriankumpf/libusb-rs", branch = "dev" }
-clap = "2.29"
+clap = "2.30"

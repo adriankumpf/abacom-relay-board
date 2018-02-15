@@ -55,7 +55,7 @@ impl<'a> RelayBoard<'a> {
             if (relays & (1 << (7 - i))) != 0 {
                 // relay on
                 ch341a::set_output(handle, DATA)?; // DATA high
-                ch341a::set_output(handle, (CLK | DATA))?; // CLK high
+                ch341a::set_output(handle, CLK | DATA)?; // CLK high
                 ch341a::set_output(handle, DATA)?; // CLK low
             } else {
                 // relay off
