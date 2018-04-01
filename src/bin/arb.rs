@@ -1,4 +1,4 @@
-extern crate abacom_relay_board;
+extern crate arb;
 
 #[macro_use]
 extern crate clap;
@@ -15,7 +15,7 @@ struct Args {
 }
 
 fn parse_args() -> Args {
-    let matches = App::new("abacom-relay-board")
+    let matches = App::new("abacom-relay-board (arb)")
         .author("Adrian K. <adrian.kumpf@posteo.de>")
         .version(crate_version!())
         .arg(
@@ -66,11 +66,11 @@ fn parse_args() -> Args {
     }
 }
 
-fn run() -> abacom_relay_board::Result {
+fn run() -> arb::Result {
     let args = parse_args();
 
     if args.get_status {
-        let result = abacom_relay_board::get_relays(args.port)?;
+        let result = arb::get_status(args.port)?;
 
         let active_relays: Vec<_> = (0..8)
             .filter_map(|m| {
@@ -86,7 +86,7 @@ fn run() -> abacom_relay_board::Result {
 
         Ok(())
     } else {
-        abacom_relay_board::switch_relays(args.relays, args.verify, args.port)
+        arb::set_status(args.relays, args.verify, args.port)
     }
 }
 

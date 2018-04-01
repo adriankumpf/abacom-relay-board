@@ -1,5 +1,5 @@
 [package]
-name = "abacom-relay-board"
+name = "arb"
 version = "0.1.0"
 authors = ["Adrian Kumpf <adrian.kumpf@posteo.de>"]
 

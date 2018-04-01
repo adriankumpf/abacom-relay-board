@@ -7,7 +7,7 @@ use libusb;
 /// A result of a function that may return an `Error`.
 pub type Result<T = ()> = StdResult<T, Error>;
 
-/// Errors returned by the `abacom_relay_board` library.
+/// Errors returned by the `arb` library.
 #[derive(Debug, PartialEq)]
 pub enum Error {
     /// libusb error
@@ -19,10 +19,13 @@ pub enum Error {
     /// multiple relay baords found
     MultipleFound,
 
+    /// Verification failed
     VerificationFailed,
 
+    /// Reading would exceeded the expected buffer size
     UnsafeRead,
 
+    /// Usb device malfunction
     BadDevice,
 }
 
