@@ -48,11 +48,11 @@ impl<'a> RelayBoard<'a> {
         Ok(handle)
     }
 
-    fn shift_out_bits(&self, handle: &libusb::DeviceHandle, relays: u8) -> Result {
+    fn shift_out_bits(&self, handle: &libusb::DeviceHandle, status: u8) -> Result {
         ch341a::set_output(handle, 0)?; // All lines low
 
         for i in 0..8 {
-            if (relays & (1 << (7 - i))) != 0 {
+            if (status & (1 << (7 - i))) != 0 {
                 // relay on
                 ch341a::set_output(handle, DATA)?; // DATA high
                 ch341a::set_output(handle, CLK | DATA)?; // CLK high
@@ -62,7 +62,6 @@ impl<'a> RelayBoard<'a> {
                 ch341a::set_output(handle, 0)?; // DATA low
                 ch341a::set_output(handle, CLK)?; // CLK high
                 ch341a::set_output(handle, 0)?; // CLK low
-                                                // ch341a::set_output(&mut handle, 0)?; // All lines low
             }
         }
 
@@ -71,22 +70,22 @@ impl<'a> RelayBoard<'a> {
         Ok(())
     }
 
-    fn set_active_relays(&self, handle: &libusb::DeviceHandle, relays: u8, verify: bool) -> Result {
+    fn set_status(&self, handle: &libusb::DeviceHandle, status: u8, verify: bool) -> Result {
         ch341a::set_output(handle, 0)?; // Latch low
 
-        self.shift_out_bits(handle, relays)?;
+        self.shift_out_bits(handle, status)?;
 
         ch341a::set_output(handle, LATCH)?; // Latch high
         ch341a::set_output(handle, 0)?; // Latch, CLK, OE low
 
-        if verify && self.get_active_relays(handle)? != relays {
+        if verify && self.get_status(handle)? != status {
             return Err(Error::VerificationFailed);
         }
 
         Ok(())
     }
 
-    fn get_active_relays(&self, handle: &libusb::DeviceHandle) -> Result<u8> {
+    fn get_status(&self, handle: &libusb::DeviceHandle) -> Result<u8> {
         let mut result = 0;
 
         ch341a::set_output(handle, 0)?; // all lines low
@@ -136,15 +135,31 @@ fn find_relay_board(context: &libusb::Context, port: Option<u8>) -> Result<Relay
     relay_board.ok_or(Error::NotFound)
 }
 
-pub fn get_relays(port: Option<u8>) -> Result<u8> {
+/// Returns the status of the relay board.
+///
+/// The status encodes which relays are currently active: Bit 0 to 7 represent the status of relay
+/// 1 to 8 (according to the [data sheet](http://www.abacom-online.de/div/ABACOM_USB_LRB.pdf)),
+/// where a `1` means active.
+///
+/// # Arguments
+///
+/// * `port` - A `u8` that specifies which USB port to use. Only necessary if multiple relay boards
+/// are connected (optional).
+///
+/// # Example
+///
+/// ```
+/// let status = arb::get_status(None);
+/// ```
+pub fn get_status(port: Option<u8>) -> Result<u8> {
     let context = libusb::Context::new()?;
     let relay_board = find_relay_board(&context, port)?;
     let handle = relay_board.open_device()?;
 
-    let old_status = relay_board.get_active_relays(&handle)?;
+    let old_status = relay_board.get_status(&handle)?;
     let test_status = !old_status;
     relay_board.shift_out_bits(&handle, test_status)?;
-    let status = relay_board.get_active_relays(&handle)?;
+    let status = relay_board.get_status(&handle)?;
 
     if status != test_status {
         return Err(Error::BadDevice);
@@ -155,10 +170,27 @@ pub fn get_relays(port: Option<u8>) -> Result<u8> {
     Ok(old_status)
 }
 
-pub fn switch_relays(relays: u8, verify: bool, port: Option<u8>) -> Result {
+/// Activates the given relays.
+///
+/// # Arguments
+///
+/// * `status` - encodes which relays should be activated: Bit 0 to 7 represent the status of relay
+/// 1 to 8 (according to the [data sheet](http://www.abacom-online.de/div/ABACOM_USB_LRB.pdf)),
+/// where a `1` means active. A status of `0` turns off all relays.
+/// * `port` - A `u8` that specifies which USB port to use. Only necessary if multiple relay boards
+/// are connected (optional).
+/// * `verify` – A `bool` that configures whether the activation should be verified.
+///
+/// # Example
+///
+/// ```
+/// // Activates relay 1, 2, 4, 5 and 6
+/// arb::set_status(55, true, None)?;
+/// ```
+pub fn set_status(status: u8, verify: bool, port: Option<u8>) -> Result {
     let context = libusb::Context::new()?;
     let relay_board = find_relay_board(&context, port)?;
     let handle = relay_board.open_device()?;
 
-    relay_board.set_active_relays(&handle, relays, verify)
+    relay_board.set_status(&handle, status, verify)
 }
