@@ -9,6 +9,7 @@ use clap::{App, Arg};
 
 struct Args {
     get_status: bool,
+    reset: bool,
     relays: u8,
     verify: bool,
     port: Option<u8>,
@@ -40,6 +41,13 @@ fn parse_args() -> Args {
                 .conflicts_with("RELAYS"),
         )
         .arg(
+            Arg::with_name("reset")
+                .short("r")
+                .long("reset")
+                .help("Reset the relay board")
+                .conflicts_with("RELAYS"),
+        )
+        .arg(
             Arg::with_name("RELAYS")
                 .help("Sets the relays to activate")
                 .default_value("0")
@@ -51,6 +59,7 @@ fn parse_args() -> Args {
 
     let port = value_t!(matches, "port", u8).ok();
     let get_status = matches.is_present("get_status");
+    let reset = matches.is_present("reset");
     let verify = !matches.is_present("disable-verification");
     let relays = values_t!(matches, "RELAYS", u8)
         .unwrap()
@@ -60,6 +69,7 @@ fn parse_args() -> Args {
 
     Args {
         get_status,
+        reset,
         relays,
         verify,
         port,
@@ -85,6 +95,8 @@ fn run() -> arb::Result {
         println!("Active relays: {}", active_relays.join(" "));
 
         Ok(())
+    } else if args.reset {
+        arb::reset(args.port)
     } else {
         arb::set_status(args.relays, args.verify, args.port)
     }

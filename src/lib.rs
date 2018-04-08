@@ -194,3 +194,25 @@ pub fn set_status(status: u8, verify: bool, port: Option<u8>) -> Result {
 
     relay_board.set_status(&handle, status, verify)
 }
+
+/// Resets the relay board.
+///
+/// # Arguments
+///
+/// * `port` - A `u8` that specifies which USB port to use. Only necessary if multiple relay boards
+/// are connected (optional).
+///
+/// # Example
+///
+/// ```
+/// arb::reset(None)?;
+/// ```
+pub fn reset(port: Option<u8>) -> Result {
+    let context = libusb::Context::new()?;
+    let relay_board = find_relay_board(&context, port)?;
+    let mut handle = relay_board.open_device()?;
+
+    handle.reset()?;
+
+    Ok(())
+}

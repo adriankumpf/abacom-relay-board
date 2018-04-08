@@ -1,6 +1,6 @@
 [package]
 name = "arb"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Adrian Kumpf <adrian.kumpf@posteo.de>"]
 
 [dependencies]
