@@ -4,5 +4,12 @@ version = "0.1.0"
 authors = ["Adrian Kumpf <adrian.kumpf@posteo.de>"]
 
 [dependencies]
+clap = { version =  "2.30", optional = true }
 libusb = { git = "https://github.com/adriankumpf/libusb-rs", branch = "dev" }
-clap = "2.30"
+
+[features]
+build-binary = ["clap"]
+
+[[bin]]
+name = "arb"
+required-features = ["build-binary"]
