@@ -1,7 +1,7 @@
 extern crate libusb;
 
-mod errors;
 mod ch341a;
+mod errors;
 
 pub use errors::{Error, Result};
 

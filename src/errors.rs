@@ -1,5 +1,5 @@
-use std::fmt;
 use std::error::Error as StdError;
+use std::fmt;
 use std::result::Result as StdResult;
 
 use libusb;
@@ -31,8 +31,8 @@ pub enum Error {
 
 impl Error {
     pub fn strerror(&self) -> &str {
-        match *self {
-            Error::Usb(ref err) => err.description(),
+        match self {
+            Error::Usb(err) => err.description(),
             Error::NotFound => "no relay board found",
             Error::MultipleFound => "multiple relay boards found",
             Error::VerificationFailed => "verification failed",

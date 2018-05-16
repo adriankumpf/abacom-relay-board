@@ -4,7 +4,6 @@ extern crate arb;
 extern crate clap;
 extern crate libusb;
 
-use std::process;
 use clap::{App, Arg};
 
 struct Args {
@@ -76,7 +75,7 @@ fn parse_args() -> Args {
     }
 }
 
-fn run() -> arb::Result {
+fn main() -> arb::Result {
     let args = parse_args();
 
     if args.get_status {
@@ -100,14 +99,4 @@ fn run() -> arb::Result {
     } else {
         arb::set_status(args.relays, args.verify, args.port)
     }
-}
-
-fn main() {
-    process::exit(match run() {
-        Ok(_) => 0,
-        Err(err) => {
-            eprintln!("error: {}", err);
-            1
-        }
-    });
 }

@@ -6,7 +6,7 @@ A crate for controlling the ABACOM CH341A relay board.
 
 ### Requirements
 
-In order to compile the native [libusb](https://github.com/libusb/libusb) library is required. All systems supported by `libusb` library are also supported.
+In order to compile Rust 1.26 and the native [libusb](https://github.com/libusb/libusb) library are required. All systems supported by `libusb` library are also supported.
 
 ### Installation
 
