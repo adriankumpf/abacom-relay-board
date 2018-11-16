@@ -43,7 +43,7 @@ impl Error {
 }
 
 impl fmt::Display for Error {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> StdResult<(), fmt::Error> {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> StdResult<(), fmt::Error> {
         fmt.write_str(self.strerror())
     }
 }

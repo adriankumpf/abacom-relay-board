@@ -1,9 +1,9 @@
-extern crate libusb;
+use libusb;
 
 mod ch341a;
 mod errors;
 
-pub use errors::{Error, Result};
+pub use self::errors::{Error, Result};
 
 const VENDOR_ID: u16 = 0x1a86;
 const PRODUCT_ID: u16 = 0x5512;
@@ -34,7 +34,7 @@ impl<'a> RelayBoard<'a> {
         self.device.port_number()
     }
 
-    fn open_device(&self) -> Result<libusb::DeviceHandle> {
+    fn open_device(&self) -> Result<libusb::DeviceHandle<'_>> {
         const EP_IFACE: u8 = 0;
 
         let mut handle = self.device.open()?;
@@ -48,7 +48,7 @@ impl<'a> RelayBoard<'a> {
         Ok(handle)
     }
 
-    fn shift_out_bits(&self, handle: &libusb::DeviceHandle, status: u8) -> Result {
+    fn shift_out_bits(&self, handle: &libusb::DeviceHandle<'_>, status: u8) -> Result {
         ch341a::set_output(handle, 0)?; // All lines low
 
         for i in 0..8 {
@@ -70,7 +70,7 @@ impl<'a> RelayBoard<'a> {
         Ok(())
     }
 
-    fn set_status(&self, handle: &libusb::DeviceHandle, status: u8, verify: bool) -> Result {
+    fn set_status(&self, handle: &libusb::DeviceHandle<'_>, status: u8, verify: bool) -> Result {
         ch341a::set_output(handle, 0)?; // Latch low
 
         self.shift_out_bits(handle, status)?;
@@ -85,7 +85,7 @@ impl<'a> RelayBoard<'a> {
         Ok(())
     }
 
-    fn get_status(&self, handle: &libusb::DeviceHandle) -> Result<u8> {
+    fn get_status(&self, handle: &libusb::DeviceHandle<'_>) -> Result<u8> {
         let mut result = 0;
 
         ch341a::set_output(handle, 0)?; // all lines low
@@ -110,7 +110,7 @@ impl<'a> RelayBoard<'a> {
     }
 }
 
-fn find_relay_board(context: &libusb::Context, port: Option<u8>) -> Result<RelayBoard> {
+fn find_relay_board(context: &libusb::Context, port: Option<u8>) -> Result<RelayBoard<'_>> {
     let mut relay_board = None;
     let mut boards_seen = 0;
 
