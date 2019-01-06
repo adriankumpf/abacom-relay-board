@@ -1,6 +1,8 @@
 use lazy_static::lazy_static;
 use structopt::StructOpt;
 
+use std::io::{self, Write};
+
 lazy_static! {
     static ref RS: Vec<&'static str> = vec!["0", "1", "2", "3", "4", "5", "6", "7", "8"];
 }
@@ -45,7 +47,7 @@ fn main() -> arb::Result {
             })
             .collect();
 
-        println!("Active relays: {}", active_relays.join(" "));
+        writeln!(io::stdout(), "Active relays: {}", active_relays.join(" "))?;
 
         return Ok(());
     }

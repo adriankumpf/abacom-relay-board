@@ -27,7 +27,7 @@ impl<'a> RelayBoard<'a> {
             return Ok(None);
         };
 
-        Ok(Some(RelayBoard { device: device }))
+        Ok(Some(RelayBoard { device }))
     }
 
     fn get_port(&self) -> u8 {

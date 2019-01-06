@@ -1,5 +1,6 @@
 use std::error::Error as StdError;
 use std::fmt;
+use std::io;
 use std::result::Result as StdResult;
 
 use libusb;
@@ -8,10 +9,13 @@ use libusb;
 pub type Result<T = ()> = StdResult<T, Error>;
 
 /// Errors returned by the `arb` library.
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub enum Error {
     /// libusb error
     Usb(libusb::Error),
+
+    /// IO error
+    IO(io::Error),
 
     /// relay board not found
     NotFound,
@@ -33,6 +37,7 @@ impl Error {
     pub fn strerror(&self) -> &str {
         match self {
             Error::Usb(err) => err.description(),
+            Error::IO(err) => err.description(),
             Error::NotFound => "no relay board found",
             Error::MultipleFound => "multiple relay boards found",
             Error::VerificationFailed => "verification failed",
@@ -57,5 +62,11 @@ impl StdError for Error {
 impl From<libusb::Error> for Error {
     fn from(err: libusb::Error) -> Error {
         Error::Usb(err)
+    }
+}
+
+impl From<io::Error> for Error {
+    fn from(err: io::Error) -> Error {
+        Error::IO(err)
     }
 }
