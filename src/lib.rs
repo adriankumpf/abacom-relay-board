@@ -14,13 +14,12 @@ const CLK: u8 = 0x08; // to A6275 CLK in
 const DATA: u8 = 0x20; // to A6275 Serial in
 const READ: u8 = 0x80; // from A6275 Serial out
 
-#[derive(Clone)]
-struct RelayBoard<'a> {
-    device: libusb::Device<'a>,
+struct RelayBoard {
+    device: libusb::Device,
 }
 
-impl<'a> RelayBoard<'a> {
-    fn from(device: libusb::Device<'a>) -> Result<Option<RelayBoard<'a>>> {
+impl RelayBoard {
+    fn from(device: libusb::Device) -> Result<Option<RelayBoard>> {
         let dd = device.device_descriptor()?;
 
         if dd.vendor_id() != VENDOR_ID || dd.product_id() != PRODUCT_ID {
@@ -34,7 +33,7 @@ impl<'a> RelayBoard<'a> {
         self.device.port_number()
     }
 
-    fn open_device(&self) -> Result<libusb::DeviceHandle<'_>> {
+    fn open_device(&self) -> Result<libusb::DeviceHandle> {
         const EP_IFACE: u8 = 0;
 
         let mut handle = self.device.open()?;
@@ -48,7 +47,7 @@ impl<'a> RelayBoard<'a> {
         Ok(handle)
     }
 
-    fn shift_out_bits(&self, handle: &libusb::DeviceHandle<'_>, status: u8) -> Result {
+    fn shift_out_bits(&self, handle: &libusb::DeviceHandle, status: u8) -> Result {
         ch341a::set_output(handle, 0)?; // All lines low
 
         for i in 0..8 {
@@ -70,7 +69,7 @@ impl<'a> RelayBoard<'a> {
         Ok(())
     }
 
-    fn set_status(&self, handle: &libusb::DeviceHandle<'_>, status: u8, verify: bool) -> Result {
+    fn set_status(&self, handle: &libusb::DeviceHandle, status: u8, verify: bool) -> Result {
         ch341a::set_output(handle, 0)?; // Latch low
 
         self.shift_out_bits(handle, status)?;
@@ -85,7 +84,7 @@ impl<'a> RelayBoard<'a> {
         Ok(())
     }
 
-    fn get_status(&self, handle: &libusb::DeviceHandle<'_>) -> Result<u8> {
+    fn get_status(&self, handle: &libusb::DeviceHandle) -> Result<u8> {
         let mut result = 0;
 
         ch341a::set_output(handle, 0)?; // all lines low
@@ -110,7 +109,7 @@ impl<'a> RelayBoard<'a> {
     }
 }
 
-fn find_relay_board(context: &libusb::Context, port: Option<u8>) -> Result<RelayBoard<'_>> {
+fn find_relay_board(context: libusb::Context, port: Option<u8>) -> Result<RelayBoard> {
     let mut relay_board = None;
     let mut boards_seen = 0;
 
@@ -153,7 +152,7 @@ fn find_relay_board(context: &libusb::Context, port: Option<u8>) -> Result<Relay
 /// ```
 pub fn get_status(port: Option<u8>) -> Result<u8> {
     let context = libusb::Context::new()?;
-    let relay_board = find_relay_board(&context, port)?;
+    let relay_board = find_relay_board(context, port)?;
     let handle = relay_board.open_device()?;
 
     let old_status = relay_board.get_status(&handle)?;
@@ -189,7 +188,7 @@ pub fn get_status(port: Option<u8>) -> Result<u8> {
 /// ```
 pub fn set_status(status: u8, verify: bool, port: Option<u8>) -> Result {
     let context = libusb::Context::new()?;
-    let relay_board = find_relay_board(&context, port)?;
+    let relay_board = find_relay_board(context, port)?;
     let handle = relay_board.open_device()?;
 
     relay_board.set_status(&handle, status, verify)
@@ -209,7 +208,7 @@ pub fn set_status(status: u8, verify: bool, port: Option<u8>) -> Result {
 /// ```
 pub fn reset(port: Option<u8>) -> Result {
     let context = libusb::Context::new()?;
-    let relay_board = find_relay_board(&context, port)?;
+    let relay_board = find_relay_board(context, port)?;
     let mut handle = relay_board.open_device()?;
 
     handle.reset()?;
