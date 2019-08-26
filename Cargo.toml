@@ -7,7 +7,7 @@ edition = '2018'
 [dependencies]
 structopt = { version = "0.2.15", optional = true }
 libusb = { git = "https://github.com/otavio/libusb-rs", branch = "master" }
-lazy_static = "1.3.0"
+lazy_static = "1.4.0"
 
 [features]
 build-binary = ["structopt"]
