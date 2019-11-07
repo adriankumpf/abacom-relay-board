@@ -1,72 +1,36 @@
-use std::error::Error as StdError;
-use std::fmt;
-use std::io;
-use std::result::Result as StdResult;
-
-use libusb;
+use thiserror::Error;
 
 /// A result of a function that may return an `Error`.
-pub type Result<T = ()> = StdResult<T, Error>;
+pub type Result<T = ()> = std::result::Result<T, Error>;
 
 /// Errors returned by the `arb` library.
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum Error {
-    /// libusb error
-    Usb(libusb::Error),
+    /// rusb error
+    #[error("{0}")]
+    Usb(#[from] rusb::Error),
 
     /// IO error
-    IO(io::Error),
+    #[error("{0}")]
+    IO(#[from] std::io::Error),
 
     /// relay board not found
+    #[error("no relay board found")]
     NotFound,
 
     /// multiple relay baords found
+    #[error("multiple relay boards found")]
     MultipleFound,
 
     /// Verification failed
+    #[error("verification failed")]
     VerificationFailed,
 
     /// Reading would exceeded the expected buffer size
+    #[error("unsafe read")]
     UnsafeRead,
 
     /// Usb device malfunction
+    #[error("bad device")]
     BadDevice,
-}
-
-impl Error {
-    pub fn strerror(&self) -> &str {
-        match self {
-            Error::Usb(err) => err.description(),
-            Error::IO(err) => err.description(),
-            Error::NotFound => "no relay board found",
-            Error::MultipleFound => "multiple relay boards found",
-            Error::VerificationFailed => "verification failed",
-            Error::UnsafeRead => "unsafe read",
-            Error::BadDevice => "bad device",
-        }
-    }
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> StdResult<(), fmt::Error> {
-        fmt.write_str(self.strerror())
-    }
-}
-
-impl StdError for Error {
-    fn description(&self) -> &str {
-        self.strerror()
-    }
-}
-
-impl From<libusb::Error> for Error {
-    fn from(err: libusb::Error) -> Error {
-        Error::Usb(err)
-    }
-}
-
-impl From<io::Error> for Error {
-    fn from(err: io::Error) -> Error {
-        Error::IO(err)
-    }
 }

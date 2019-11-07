@@ -1,11 +1,6 @@
-use lazy_static::lazy_static;
 use structopt::StructOpt;
 
 use std::io::{self, Write};
-
-lazy_static! {
-    static ref RS: Vec<&'static str> = vec!["0", "1", "2", "3", "4", "5", "6", "7", "8"];
-}
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "abacom-relay-board (arb)")]
@@ -19,7 +14,7 @@ struct Args {
     reset: bool,
 
     /// Disables the verifaction after activating relays
-    #[structopt(short, long = "disable-verifaction", requires = "RELAYS")]
+    #[structopt(short, long, requires = "RELAYS")]
     disable_verification: bool,
 
     /// Custom USB Port
@@ -27,7 +22,7 @@ struct Args {
     port: Option<u8>,
 
     /// The relays to activate
-    #[structopt(name = "RELAYS", default_value = "0", raw(possible_values = "&RS"))]
+    #[structopt(name = "RELAYS", default_value = "0", possible_values = &["0", "1", "2", "3", "4", "5", "6", "7", "8"])]
     relays: Vec<u8>,
 }
 
