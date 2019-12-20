@@ -17,7 +17,7 @@ Add `arb` as a dependency in Cargo.toml:
 
 ```toml
 [dependencies]
-arb = { git = "https://github.com/adriankumpf/abacom-relay-board", tag = 'v0.4.0' }
+arb = { git = "https://github.com/adriankumpf/abacom-relay-board", tag = 'v0.5.0' }
 ```
 
 #### As binary
