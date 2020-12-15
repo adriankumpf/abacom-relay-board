@@ -5,9 +5,9 @@ authors = ["Adrian Kumpf <adrian.kumpf@posteo.de>"]
 edition = '2018'
 
 [dependencies]
-structopt = { version = "0.3.5", optional = true }
-rusb = "0.5"
-thiserror = "1.0.9"
+structopt = { version = "0.3.21", optional = true }
+rusb = "0.6.5"
+thiserror = "1.0.22"
 
 [features]
 build-binary = ["structopt"]
