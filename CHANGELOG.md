@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.5.1] - 2021-03-19
+
+### Changed
+
+- Bump rusb to 0.8
+
 ## [0.5.0] - 2019-12-20
 
 ### Changed
@@ -54,7 +60,8 @@
 
 ## [0.1.0] - 2018-04-01
 
-[unreleased]: https://github.com/adriankumpf/abacom-relay-board/compare/v0.5.0...HEAD
+[unreleased]: https://github.com/adriankumpf/abacom-relay-board/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/adriankumpf/abacom-relay-board/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/adriankumpf/abacom-relay-board/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/adriankumpf/abacom-relay-board/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/adriankumpf/abacom-relay-board/compare/v0.2.2...v0.3.0
