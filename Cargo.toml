@@ -6,8 +6,8 @@ edition = '2018'
 
 [dependencies]
 structopt = { version = "0.3.21", optional = true }
-rusb = "0.6.5"
-thiserror = "1.0.22"
+rusb = "0.8.0"
+thiserror = "1.0.24"
 
 [features]
 build-binary = ["structopt"]
