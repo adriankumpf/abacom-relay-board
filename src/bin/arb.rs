@@ -1,33 +1,33 @@
-use structopt::StructOpt;
+use clap::Parser;
 
 use std::io::{self, Write};
 
-#[derive(StructOpt, Debug)]
-#[structopt(name = "abacom-relay-board (arb)")]
+#[derive(Parser, Debug)]
+#[clap(name = "abacom-relay-board (arb)")]
 struct Args {
     /// Gets relays status
-    #[structopt(short, long, requires = "RELAYS")]
+    #[clap(short, long, requires = "RELAYS")]
     status: bool,
 
     /// Resets the relay board
-    #[structopt(short, long, conflicts_with = "RELAYS")]
+    #[clap(short, long, conflicts_with = "RELAYS")]
     reset: bool,
 
     /// Disables the verifaction after activating relays
-    #[structopt(short, long, requires = "RELAYS")]
+    #[clap(short, long, requires = "RELAYS")]
     disable_verification: bool,
 
     /// Custom USB Port
-    #[structopt(short, long)]
+    #[clap(short, long)]
     port: Option<u8>,
 
     /// The relays to activate
-    #[structopt(name = "RELAYS", default_value = "0", possible_values = &["0", "1", "2", "3", "4", "5", "6", "7", "8"])]
+    #[clap(name = "RELAYS", default_value = "0", possible_values = &["0", "1", "2", "3", "4", "5", "6", "7", "8"])]
     relays: Vec<u8>,
 }
 
 fn main() -> arb::Result {
-    let args = Args::from_args();
+    let args = Args::parse();
 
     if args.status {
         let result = arb::get_status(args.port)?;

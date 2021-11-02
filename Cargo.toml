@@ -1,16 +1,16 @@
 [package]
 name = "arb"
 version = "0.5.1"
-authors = ["Adrian Kumpf <adrian.kumpf@posteo.de>"]
-edition = '2018'
+authors = ["Adrian Kumpf"]
+edition = '2021'
 
 [dependencies]
-structopt = { version = "0.3.21", optional = true }
-rusb = "0.8.0"
-thiserror = "1.0.24"
+clap = { version = "3.0.0-beta.5", optional = true }
+rusb = "0.9.0"
+thiserror = "1.0.30"
 
 [features]
-build-binary = ["structopt"]
+build-binary = ["clap"]
 
 [[bin]]
 name = "arb"
