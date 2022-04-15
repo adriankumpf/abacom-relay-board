@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [0.5.2] - 2022-04-16
+
+### Changed
+
+- Bump rusb to 0.9
+- Migrate to clap v3
+
 ## [0.5.1] - 2021-03-19
 
 ### Changed
@@ -60,7 +67,8 @@
 
 ## [0.1.0] - 2018-04-01
 
-[unreleased]: https://github.com/adriankumpf/abacom-relay-board/compare/v0.5.1...HEAD
+[unreleased]: https://github.com/adriankumpf/abacom-relay-board/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/adriankumpf/abacom-relay-board/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/adriankumpf/abacom-relay-board/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/adriankumpf/abacom-relay-board/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/adriankumpf/abacom-relay-board/compare/v0.3.0...v0.4.0
