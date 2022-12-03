@@ -1,28 +1,28 @@
-use clap::Parser;
+use clap::{value_parser, Parser};
 
 use std::io::{self, Write};
 
 #[derive(Parser, Debug)]
-#[clap(name = "abacom-relay-board (arb)")]
+#[command(name = "abacom-relay-board (arb)")]
 struct Args {
     /// Gets relays status
-    #[clap(short, long, requires = "RELAYS")]
+    #[arg(short, long, requires = "relays")]
     status: bool,
 
     /// Resets the relay board
-    #[clap(short, long, conflicts_with = "RELAYS")]
+    #[arg(short, long, conflicts_with = "relays")]
     reset: bool,
 
     /// Disables the verifaction after activating relays
-    #[clap(short, long, requires = "RELAYS")]
+    #[arg(short, long, requires = "relays")]
     disable_verification: bool,
 
     /// Custom USB Port
-    #[clap(short, long)]
+    #[arg(short, long)]
     port: Option<u8>,
 
     /// The relays to activate
-    #[clap(name = "RELAYS", default_value = "0", possible_values = &["0", "1", "2", "3", "4", "5", "6", "7", "8"])]
+    #[arg(value_name = "RELAYS", default_value = "0", value_parser = value_parser!(u8).range(0..8))]
     relays: Vec<u8>,
 }
 
