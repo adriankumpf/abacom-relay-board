@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [0.5.3] - 2024-03-02
+
+- Update dependencies
+
 ## [0.5.2] - 2022-04-16
 
 ### Changed
@@ -67,7 +71,8 @@
 
 ## [0.1.0] - 2018-04-01
 
-[unreleased]: https://github.com/adriankumpf/abacom-relay-board/compare/v0.5.2...HEAD
+[unreleased]: https://github.com/adriankumpf/abacom-relay-board/compare/v0.5.3...HEAD
+[0.5.3]: https://github.com/adriankumpf/abacom-relay-board/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/adriankumpf/abacom-relay-board/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/adriankumpf/abacom-relay-board/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/adriankumpf/abacom-relay-board/compare/v0.4.0...v0.5.0
