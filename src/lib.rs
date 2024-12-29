@@ -39,7 +39,7 @@ impl RelayBoard {
     fn open_device(&self) -> Result<DeviceHandle> {
         const EP_IFACE: u8 = 0;
 
-        let mut handle = self.device.open()?;
+        let handle = self.device.open()?;
 
         if let Ok(true) = handle.kernel_driver_active(EP_IFACE) {
             handle.detach_kernel_driver(EP_IFACE)?;
@@ -146,7 +146,7 @@ fn find_relay_board(context: rusb::Context, port: Option<u8>) -> Result<RelayBoa
 /// # Arguments
 ///
 /// * `port` - A `u8` that specifies which USB port to use. Only necessary if multiple relay boards
-/// are connected (optional).
+///    are connected (optional).
 ///
 /// # Example
 ///
@@ -177,10 +177,10 @@ pub fn get_status(port: Option<u8>) -> Result<u8> {
 /// # Arguments
 ///
 /// * `status` - encodes which relays should be activated: Bit 0 to 7 represent the status of relay
-/// 1 to 8 (according to the [data sheet](http://www.abacom-online.de/div/ABACOM_USB_LRB.pdf)),
-/// where a `1` means active. A status of `0` turns off all relays.
+///   1 to 8 (according to the [data sheet](http://www.abacom-online.de/div/ABACOM_USB_LRB.pdf)),
+///   where a `1` means active. A status of `0` turns off all relays.
 /// * `port` - A `u8` that specifies which USB port to use. Only necessary if multiple relay boards
-/// are connected (optional).
+///    are connected (optional).
 /// * `verify` – A `bool` that configures whether the activation should be verified.
 ///
 /// # Example
@@ -202,7 +202,7 @@ pub fn set_status(status: u8, verify: bool, port: Option<u8>) -> Result {
 /// # Arguments
 ///
 /// * `port` - A `u8` that specifies which USB port to use. Only necessary if multiple relay boards
-/// are connected (optional).
+///   are connected (optional).
 ///
 /// # Example
 ///
@@ -212,7 +212,7 @@ pub fn set_status(status: u8, verify: bool, port: Option<u8>) -> Result {
 pub fn reset(port: Option<u8>) -> Result {
     let context = rusb::Context::new()?;
     let relay_board = find_relay_board(context, port)?;
-    let mut handle = relay_board.open_device()?;
+    let handle = relay_board.open_device()?;
 
     handle.reset()?;
 
