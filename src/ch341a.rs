@@ -1,8 +1,8 @@
 use std::slice;
 use std::time::Duration;
 
-use crate::errors::{Error, Result};
 use crate::DeviceHandle;
+use crate::errors::{Error, Result};
 
 const ENDPOINT_IN: u8 = 0x02;
 const ENDPOINT_OUT: u8 = 0x82;

@@ -1,4 +1,4 @@
-use clap::{value_parser, Parser};
+use clap::{Parser, value_parser};
 
 use std::io::{self, Write};
 
