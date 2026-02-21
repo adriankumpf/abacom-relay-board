@@ -4,8 +4,8 @@ use std::time::Duration;
 use crate::DeviceHandle;
 use crate::errors::{Error, Result};
 
-const ENDPOINT_IN: u8 = 0x02;
-const ENDPOINT_OUT: u8 = 0x82;
+const ENDPOINT_OUT: u8 = 0x02;
+const ENDPOINT_IN: u8 = 0x82;
 const READ_BUF_SIZE: usize = 32;
 
 pub fn set_output(handle: &DeviceHandle, data: u8) -> Result {
@@ -24,7 +24,7 @@ pub fn get_input(handle: &DeviceHandle) -> Result<Vec<u8>> {
 fn write(handle: &DeviceHandle, mut data: Vec<u8>) -> Result {
     let buf = unsafe { slice::from_raw_parts_mut(data[..].as_mut_ptr(), data.capacity()) };
 
-    match handle.write_bulk(ENDPOINT_IN, buf, Duration::from_millis(100)) {
+    match handle.write_bulk(ENDPOINT_OUT, buf, Duration::from_millis(100)) {
         Err(err) => Err(Error::Usb(err)),
         Ok(_len) => Ok(()),
     }
@@ -34,7 +34,7 @@ fn read(handle: &DeviceHandle) -> Result<Vec<u8>> {
     let mut vec = Vec::<u8>::with_capacity(READ_BUF_SIZE);
     let buf = unsafe { slice::from_raw_parts_mut(vec[..].as_mut_ptr(), vec.capacity()) };
 
-    match handle.read_bulk(ENDPOINT_OUT, buf, Duration::from_millis(10)) {
+    match handle.read_bulk(ENDPOINT_IN, buf, Duration::from_millis(10)) {
         Err(err) => Err(Error::Usb(err)),
         Ok(len) => {
             if len > READ_BUF_SIZE {
