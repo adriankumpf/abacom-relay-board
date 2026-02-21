@@ -94,7 +94,8 @@ impl RelayBoard {
 
         // shift out bit 0..7 from A6275...
         for i in 0..8 {
-            let input_state = ch341a::get_input(handle)?[0]; //Get status of CH341A D0..D7 lines
+            let input = ch341a::get_input(handle)?;
+            let input_state = *input.first().ok_or(Error::BadDevice)?;
 
             // READ bits from A6275 Serial out (at D7 line).
             if (input_state & READ) != 0 {
