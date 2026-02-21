@@ -22,7 +22,7 @@ struct Args {
     port: Option<u8>,
 
     /// The relays to activate
-    #[arg(value_name = "RELAYS", default_value = "0", value_parser = value_parser!(u8).range(0..8))]
+    #[arg(value_name = "RELAYS", default_value = "0", value_parser = value_parser!(u8).range(0..=8))]
     relays: Vec<u8>,
 }
 
