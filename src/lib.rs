@@ -118,10 +118,10 @@ fn find_relay_board(context: rusb::Context, port: Option<u8>) -> Result<RelayBoa
 
     for device in context.devices()?.iter() {
         if let Some(rb) = RelayBoard::from(device)? {
-            if let Some(port) = port {
-                if rb.get_port() != port {
-                    continue;
-                }
+            if let Some(port) = port
+                && rb.get_port() != port
+            {
+                continue;
             }
 
             boards_seen += 1;
@@ -146,7 +146,7 @@ fn find_relay_board(context: rusb::Context, port: Option<u8>) -> Result<RelayBoa
 /// # Arguments
 ///
 /// * `port` - A `u8` that specifies which USB port to use. Only necessary if multiple relay boards
-///    are connected (optional).
+///   are connected (optional).
 ///
 /// # Example
 ///
@@ -180,7 +180,7 @@ pub fn get_status(port: Option<u8>) -> Result<u8> {
 ///   1 to 8 (according to the [data sheet](http://www.abacom-online.de/div/ABACOM_USB_LRB.pdf)),
 ///   where a `1` means active. A status of `0` turns off all relays.
 /// * `port` - A `u8` that specifies which USB port to use. Only necessary if multiple relay boards
-///    are connected (optional).
+///   are connected (optional).
 /// * `verify` – A `bool` that configures whether the activation should be verified.
 ///
 /// # Example

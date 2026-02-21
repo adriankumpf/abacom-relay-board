@@ -5,9 +5,9 @@ authors = ["Adrian Kumpf"]
 edition = '2024'
 
 [dependencies]
-clap = { version = "4.5.35", features = ["derive"], optional = true }
+clap = { version = "4.5.60", features = ["derive"], optional = true }
 rusb = "0.9.4"
-thiserror = "2.0.12"
+thiserror = "2.0.18"
 
 [features]
 build-binary = ["clap"]
