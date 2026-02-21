@@ -13,7 +13,7 @@ struct Args {
     #[arg(short, long, conflicts_with = "relays")]
     reset: bool,
 
-    /// Disables the verifaction after activating relays
+    /// Disables the verification after activating relays
     #[arg(short, long, requires = "relays")]
     disable_verification: bool,
 

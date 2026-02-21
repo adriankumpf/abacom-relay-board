@@ -1,3 +1,26 @@
+//! Library for controlling the ABACOM CH341A USB relay board.
+//!
+//! The board uses a CH341A USB-to-parallel chip to drive an Allegro A6275 shift register,
+//! which in turn controls 8 relays. Communication is SPI-like: bits are clocked into the
+//! A6275 serially (DATA + CLK), then latched to the outputs.
+//!
+//! # Relay addressing
+//!
+//! Relay state is an 8-bit bitmask: bit 0 = relay 1, bit 7 = relay 8, `1` = active.
+//!
+//! # Examples
+//!
+//! ```no_run
+//! // Activate relays 1 and 3
+//! arb::set_status(0b00000101, true, None).unwrap();
+//!
+//! // Read back current state
+//! let status = arb::get_status(None).unwrap();
+//!
+//! // Turn everything off
+//! arb::set_status(0, true, None).unwrap();
+//! ```
+
 use rusb::UsbContext;
 
 mod ch341a;
@@ -5,14 +28,16 @@ mod errors;
 
 pub use self::errors::{Error, Result};
 
+/// USB vendor ID for the WCH CH341A chip.
 const VENDOR_ID: u16 = 0x1a86;
+/// USB product ID for the CH341A in parallel/GPIO mode.
 const PRODUCT_ID: u16 = 0x5512;
 
-// Allegro A6275 driver chip
-const LATCH: u8 = 0x01; // to A6275 Latch in
-const CLK: u8 = 0x08; // to A6275 CLK in
-const DATA: u8 = 0x20; // to A6275 Serial in
-const READ: u8 = 0x80; // from A6275 Serial out
+// Allegro A6275 pin mapping on the CH341A D0–D7 GPIO lines.
+const LATCH: u8 = 0x01; // D0 → A6275 Latch
+const CLK: u8 = 0x08; // D3 → A6275 CLK
+const DATA: u8 = 0x20; // D5 → A6275 Serial in
+const READ: u8 = 0x80; // D7 ← A6275 Serial out
 
 type DeviceHandle = rusb::DeviceHandle<rusb::Context>;
 type Device = rusb::Device<rusb::Context>;
@@ -50,35 +75,38 @@ impl RelayBoard {
         Ok(handle)
     }
 
+    /// Shifts 8 bits into the A6275 shift register (MSB first) without latching.
     fn shift_out_bits(&self, handle: &DeviceHandle, status: u8) -> Result {
-        ch341a::set_output(handle, 0)?; // All lines low
+        ch341a::set_output(handle, 0)?;
 
         for i in 0..8 {
             if (status & (1 << (7 - i))) != 0 {
-                // relay on
-                ch341a::set_output(handle, DATA)?; // DATA high
-                ch341a::set_output(handle, CLK | DATA)?; // CLK high
-                ch341a::set_output(handle, DATA)?; // CLK low
+                ch341a::set_output(handle, DATA)?;
+                ch341a::set_output(handle, CLK | DATA)?;
+                ch341a::set_output(handle, DATA)?;
             } else {
-                // relay off
-                ch341a::set_output(handle, 0)?; // DATA low
-                ch341a::set_output(handle, CLK)?; // CLK high
-                ch341a::set_output(handle, 0)?; // CLK low
+                ch341a::set_output(handle, 0)?;
+                ch341a::set_output(handle, CLK)?;
+                ch341a::set_output(handle, 0)?;
             }
         }
 
-        ch341a::set_output(handle, 0)?; // All lines 0
+        ch341a::set_output(handle, 0)?;
 
         Ok(())
     }
 
+    /// Shifts `status` into the A6275 and latches it to the relay outputs.
+    ///
+    /// If `verify` is true, reads back the shift register and returns
+    /// [`Error::VerificationFailed`] if it doesn't match.
     fn set_status(&self, handle: &DeviceHandle, status: u8, verify: bool) -> Result {
-        ch341a::set_output(handle, 0)?; // Latch low
+        ch341a::set_output(handle, 0)?;
 
         self.shift_out_bits(handle, status)?;
 
-        ch341a::set_output(handle, LATCH)?; // Latch high
-        ch341a::set_output(handle, 0)?; // Latch, CLK, OE low
+        ch341a::set_output(handle, LATCH)?;
+        ch341a::set_output(handle, 0)?;
 
         if verify && self.get_status(handle)? != status {
             return Err(Error::VerificationFailed);
@@ -87,26 +115,25 @@ impl RelayBoard {
         Ok(())
     }
 
+    /// Reads the current A6275 shift register contents by clocking out 8 bits
+    /// from the serial output (D7), then restores the register to the read value.
     fn get_status(&self, handle: &DeviceHandle) -> Result<u8> {
         let mut result = 0;
 
-        ch341a::set_output(handle, 0)?; // all lines low
+        ch341a::set_output(handle, 0)?;
 
-        // shift out bit 0..7 from A6275...
         for i in 0..8 {
-            let input = ch341a::get_input(handle)?;
-            let input_state = *input.first().ok_or(Error::BadDevice)?;
+            let input_state = ch341a::get_input(handle)?;
 
-            // READ bits from A6275 Serial out (at D7 line).
             if (input_state & READ) != 0 {
                 result |= 1 << (7 - i);
             }
 
-            // generate CLK pulse for next bit from A6275
-            ch341a::set_output(handle, CLK)?; // CLK high
-            ch341a::set_output(handle, 0)?; // CLK low
+            ch341a::set_output(handle, CLK)?;
+            ch341a::set_output(handle, 0)?;
         }
 
+        // Restore the shift register (clocking zeros in during read destroyed it).
         self.shift_out_bits(handle, result)?;
 
         Ok(result)
@@ -138,22 +165,23 @@ fn find_relay_board(context: rusb::Context, port: Option<u8>) -> Result<RelayBoa
     relay_board.ok_or(Error::NotFound)
 }
 
-/// Returns the status of the relay board.
+/// Returns the current relay state as an 8-bit bitmask.
 ///
-/// The status encodes which relays are currently active: Bit 0 to 7 represent the status of relay
-/// 1 to 8 (according to the [data sheet](http://www.abacom-online.de/div/ABACOM_USB_LRB.pdf)),
-/// where a `1` means active.
+/// Bit 0 corresponds to relay 1, bit 7 to relay 8. A set bit means the relay is active.
+///
+/// Internally verifies the device is responsive by writing an inverted test pattern to the
+/// shift register (without latching, so relay outputs are not disturbed) and reading it back.
+/// Returns [`Error::BadDevice`] if the read-back doesn't match.
 ///
 /// # Arguments
 ///
-/// * `port` - A `u8` that specifies which USB port to use. Only necessary if multiple relay boards
-///   are connected (optional).
+/// * `port` - USB port number to select a specific board when multiple are connected.
 ///
-/// # Example
+/// # Errors
 ///
-/// ```
-/// let status = arb::get_status(None);
-/// ```
+/// * [`Error::NotFound`] — no relay board detected
+/// * [`Error::MultipleFound`] — multiple boards detected and `port` is `None`
+/// * [`Error::BadDevice`] — device did not respond correctly to the read-back test
 pub fn get_status(port: Option<u8>) -> Result<u8> {
     let context = rusb::Context::new()?;
     let relay_board = find_relay_board(context, port)?;
@@ -173,22 +201,23 @@ pub fn get_status(port: Option<u8>) -> Result<u8> {
     Ok(old_status)
 }
 
-/// Activates the given relays.
+/// Activates the relays specified by `status`.
+///
+/// `status` is an 8-bit bitmask: bit 0 = relay 1, bit 7 = relay 8, `1` = active.
+/// A value of `0` turns off all relays.
 ///
 /// # Arguments
 ///
-/// * `status` - encodes which relays should be activated: Bit 0 to 7 represent the status of relay
-///   1 to 8 (according to the [data sheet](http://www.abacom-online.de/div/ABACOM_USB_LRB.pdf)),
-///   where a `1` means active. A status of `0` turns off all relays.
-/// * `port` - A `u8` that specifies which USB port to use. Only necessary if multiple relay boards
-///   are connected (optional).
-/// * `verify` – A `bool` that configures whether the activation should be verified.
+/// * `status` — bitmask of relays to activate.
+/// * `verify` — if `true`, reads back the shift register after latching and returns
+///   [`Error::VerificationFailed`] on mismatch.
+/// * `port` — USB port number to select a specific board when multiple are connected.
 ///
 /// # Example
 ///
-/// ```
-/// // Activates relay 1, 2, 4, 5 and 6
-/// arb::set_status(55, true, None)?;
+/// ```no_run
+/// // Activate relays 1, 2, 4, 5 and 6
+/// arb::set_status(0b00110111, true, None).unwrap();
 /// ```
 pub fn set_status(status: u8, verify: bool, port: Option<u8>) -> Result {
     let context = rusb::Context::new()?;
@@ -198,18 +227,11 @@ pub fn set_status(status: u8, verify: bool, port: Option<u8>) -> Result {
     relay_board.set_status(&handle, status, verify)
 }
 
-/// Resets the relay board.
+/// Performs a USB reset on the relay board.
 ///
 /// # Arguments
 ///
-/// * `port` - A `u8` that specifies which USB port to use. Only necessary if multiple relay boards
-///   are connected (optional).
-///
-/// # Example
-///
-/// ```
-/// arb::reset(None)?;
-/// ```
+/// * `port` — USB port number to select a specific board when multiple are connected.
 pub fn reset(port: Option<u8>) -> Result {
     let context = rusb::Context::new()?;
     let relay_board = find_relay_board(context, port)?;
