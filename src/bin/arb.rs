@@ -56,7 +56,7 @@ fn main() -> arb::Result {
             .iter()
             .filter(|&&r| r != 0)
             .fold(0, |acc, &r| acc | 1 << (r - 1)),
-        args.disable_verification,
+        !args.disable_verification,
         args.port,
     )
 }
