@@ -26,10 +26,6 @@ pub enum Error {
     #[error("verification failed")]
     VerificationFailed,
 
-    /// Reading would exceeded the expected buffer size
-    #[error("unsafe read")]
-    UnsafeRead,
-
     /// Usb device malfunction
     #[error("bad device")]
     BadDevice,
