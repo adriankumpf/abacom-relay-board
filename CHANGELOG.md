@@ -2,6 +2,34 @@
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-04-02
+
+### Fixed
+
+- Validate USB bulk transfer lengths instead of accepting short or partial transfers
+- Return a dedicated error for unexpected USB transfer lengths
+
+### Changed
+
+- Bump `clap` to 4.6.0
+
+## [0.7.0] - 2026-02-21
+
+### Bug Fixes
+
+- Fix inverted `disable_verification` flag
+- Fix relay range to allow relay 8
+- Fix swapped USB endpoint names
+- Fix unchecked indexing on USB read result in `get_status`
+- Fix CLI argument validation: add conflicts and remove silent default
+
+### Improvements
+
+- Remove all unsafe code from `ch341a.rs`
+- Simplify `ch341a.rs`: inline helpers and use stack arrays
+- Return `u8` from `get_input` and add documentation (**breaking**)
+- Bump deps and fix warnings
+
 ## [0.6.0] - 2025-04-10
 
 - Bump Rust edition to 2024
@@ -77,7 +105,9 @@
 
 ## [0.1.0] - 2018-04-01
 
-[unreleased]: https://github.com/adriankumpf/abacom-relay-board/compare/v0.6.0...HEAD
+[unreleased]: https://github.com/adriankumpf/abacom-relay-board/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/adriankumpf/abacom-relay-board/compare/v0.7.0...v0.7.1
+[0.7.0]: https://github.com/adriankumpf/abacom-relay-board/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/adriankumpf/abacom-relay-board/compare/v0.5.3...v0.6.0
 [0.5.3]: https://github.com/adriankumpf/abacom-relay-board/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/adriankumpf/abacom-relay-board/compare/v0.5.1...v0.5.2
