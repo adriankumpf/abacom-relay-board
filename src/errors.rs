@@ -26,6 +26,10 @@ pub enum Error {
     #[error("verification failed")]
     VerificationFailed,
 
+    /// A USB bulk transfer completed with an unexpected length.
+    #[error("unexpected usb transfer length: expected {expected} bytes, got {actual}")]
+    UnexpectedTransferLength { expected: usize, actual: usize },
+
     /// The device did not respond as expected (e.g. empty read or failed read-back test).
     #[error("bad device")]
     BadDevice,
