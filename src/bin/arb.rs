@@ -26,6 +26,46 @@ struct Args {
     relays: Vec<u8>,
 }
 
+fn main() -> arb::Result {
+    let args = Args::parse();
+
+    if !args.status && !args.reset && args.relays.is_empty() {
+        Args::command().print_help()?;
+        std::process::exit(2);
+    }
+
+    if args.status {
+        let result = arb::get_status(args.port)?;
+
+        let active_relays: Vec<_> = (0..8)
+            .filter_map(|m| {
+                if (1 << m) & result != 0 {
+                    Some((m + 1).to_string())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        writeln!(io::stdout(), "Active relays: {}", active_relays.join(" "))?;
+
+        return Ok(());
+    }
+
+    if args.reset {
+        return arb::reset(args.port);
+    }
+
+    arb::set_status(
+        args.relays
+            .iter()
+            .filter(|&&r| r != 0)
+            .fold(0, |acc, &r| acc | 1 << (r - 1)),
+        !args.disable_verification,
+        args.port,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -108,44 +148,4 @@ mod tests {
     fn reset_conflicts_with_disable_verification() {
         assert!(parse(&["--reset", "-d"]).is_err());
     }
-}
-
-fn main() -> arb::Result {
-    let args = Args::parse();
-
-    if !args.status && !args.reset && args.relays.is_empty() {
-        Args::command().print_help()?;
-        std::process::exit(2);
-    }
-
-    if args.status {
-        let result = arb::get_status(args.port)?;
-
-        let active_relays: Vec<_> = (0..8)
-            .filter_map(|m| {
-                if (1 << m) & result != 0 {
-                    Some((m + 1).to_string())
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        writeln!(io::stdout(), "Active relays: {}", active_relays.join(" "))?;
-
-        return Ok(());
-    }
-
-    if args.reset {
-        return arb::reset(args.port);
-    }
-
-    arb::set_status(
-        args.relays
-            .iter()
-            .filter(|&&r| r != 0)
-            .fold(0, |acc, &r| acc | 1 << (r - 1)),
-        !args.disable_verification,
-        args.port,
-    )
 }
