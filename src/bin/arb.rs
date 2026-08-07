@@ -33,6 +33,23 @@ fn main() {
     }
 }
 
+/// Converts relay numbers into the bitmask the library expects.
+///
+/// Relay `n` is bit `n - 1`. `0` is not a relay and contributes no bits, so
+/// `arb 0` yields an empty mask — which is how "turn everything off" is spelled.
+fn relays_to_mask(relays: &[u8]) -> u8 {
+    relays
+        .iter()
+        .copied()
+        .filter(|&relay| relay != 0)
+        .fold(0, |mask, relay| mask | 1 << (relay - 1))
+}
+
+/// Returns the numbers of the relays set in `status`, in ascending order.
+fn active_relays(status: u8) -> impl Iterator<Item = u8> {
+    (1..=8u8).filter(move |relay| status & (1 << (relay - 1)) != 0)
+}
+
 fn run() -> arb::Result {
     let args = Args::parse();
 
@@ -44,12 +61,9 @@ fn run() -> arb::Result {
     if args.status {
         let status = arb::get_status(args.port)?;
 
-        let active_relays: Vec<_> = (0..8u8)
-            .filter(|bit| status & (1 << bit) != 0)
-            .map(|bit| (bit + 1).to_string())
-            .collect();
+        let active: Vec<_> = active_relays(status).map(|r| r.to_string()).collect();
 
-        writeln!(io::stdout(), "Active relays: {}", active_relays.join(" "))?;
+        writeln!(io::stdout(), "Active relays: {}", active.join(" "))?;
 
         return Ok(());
     }
@@ -58,14 +72,11 @@ fn run() -> arb::Result {
         return arb::reset(args.port);
     }
 
-    // Relay `0` means "all off" and contributes no bits.
-    let status = args
-        .relays
-        .iter()
-        .filter(|&&r| r != 0)
-        .fold(0u8, |acc, &r| acc | 1 << (r - 1));
-
-    arb::set_status(status, !args.disable_verification, args.port)
+    arb::set_status(
+        relays_to_mask(&args.relays),
+        !args.disable_verification,
+        args.port,
+    )
 }
 
 #[cfg(test)]
@@ -149,5 +160,49 @@ mod tests {
     #[test]
     fn reset_conflicts_with_disable_verification() {
         assert!(parse(&["--reset", "-d"]).is_err());
+    }
+
+    fn active(status: u8) -> Vec<u8> {
+        active_relays(status).collect()
+    }
+
+    #[test]
+    fn relay_n_is_bit_n_minus_one() {
+        // Relay 1 is the least significant bit, relay 8 the most significant.
+        for relay in 1..=8u8 {
+            assert_eq!(relays_to_mask(&[relay]), 1 << (relay - 1));
+            assert_eq!(active(1 << (relay - 1)), vec![relay]);
+        }
+    }
+
+    #[test]
+    fn relays_combine_into_one_mask() {
+        assert_eq!(relays_to_mask(&[1, 2, 4, 5, 6]), 0b0011_1011);
+        assert_eq!(active(0b0011_1011), vec![1, 2, 4, 5, 6]);
+    }
+
+    #[test]
+    fn all_relays_fill_the_mask() {
+        assert_eq!(relays_to_mask(&[1, 2, 3, 4, 5, 6, 7, 8]), u8::MAX);
+        assert_eq!(active(u8::MAX), vec![1, 2, 3, 4, 5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn an_empty_mask_turns_everything_off() {
+        assert_eq!(relays_to_mask(&[]), 0);
+        assert_eq!(relays_to_mask(&[0]), 0);
+        assert_eq!(active(0), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn relay_zero_is_ignored_beside_other_relays() {
+        // `0` only means "all off" on its own; listed alongside real relays it
+        // drops out and the others still activate.
+        assert_eq!(relays_to_mask(&[0, 3]), relays_to_mask(&[3]));
+    }
+
+    #[test]
+    fn repeating_a_relay_sets_its_bit_once() {
+        assert_eq!(relays_to_mask(&[3, 3, 3]), 0b0000_0100);
     }
 }

@@ -24,16 +24,20 @@ cargo clippy --features=build-binary   # include binary code
 
 # Formatting
 cargo fmt
+
+# Tests
+cargo test --features=build-binary
 ```
 
-There are no tests in this project.
+Tests run against a simulated A6275 (`FakeA6275` in `src/lib.rs`), so no hardware
+is needed. CI runs fmt, both clippy feature sets, and the tests.
 
 ## Architecture
 
 Three-layer design:
 
 1. **Public API** (`src/lib.rs`) — Three functions: `get_status()`, `set_status()`, `reset()`. Each takes an optional USB port number to disambiguate multiple boards.
-2. **CH341A protocol** (`src/ch341a.rs`) — Low-level USB bulk transfers via `rusb`. No `unsafe` code. Exposes `set_output()` and `get_input()`.
+2. **CH341A protocol** (`src/ch341a.rs`) — Low-level USB bulk transfers via `rusb`. No `unsafe` code. Exposes `set_output()` and `get_input()` through the `Gpio` trait, which lets the shift register protocol be tested without hardware.
 3. **CLI** (`src/bin/arb.rs`) — `clap`-derived argument parser. Only compiled with `build-binary` feature.
 
 Error types live in `src/errors.rs` using `thiserror`.

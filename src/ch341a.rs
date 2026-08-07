@@ -44,6 +44,27 @@ pub fn is_ch341a(device: &Device) -> Result<bool> {
     Ok(dd.vendor_id() == VENDOR_ID && dd.product_id() == PRODUCT_ID)
 }
 
+/// The D0–D7 GPIO lines the A6275 is driven through.
+///
+/// Setting and reading those lines is all the relay board needs from the CH341A,
+/// so keeping it behind a trait lets the shift register protocol be exercised
+/// against a simulated A6275 instead of real hardware.
+pub trait Gpio {
+    /// Sets the D0–D7 output lines to `data`.
+    ///
+    /// Each bit in `data` corresponds to one GPIO line. On the ABACOM relay board:
+    /// - Bit 0 (0x01): A6275 LATCH
+    /// - Bit 3 (0x08): A6275 CLK
+    /// - Bit 5 (0x20): A6275 Serial DATA in
+    fn set_output(&self, data: u8) -> Result;
+
+    /// Reads the D0–D7 input lines and returns byte 0 (D7–D0).
+    ///
+    /// On the ABACOM relay board, bit 7 (D7) carries the A6275 serial output,
+    /// used to read back the current shift register contents.
+    fn get_input(&self) -> Result<u8>;
+}
+
 /// An opened CH341A with its bulk interface claimed.
 pub struct Ch341a {
     handle: DeviceHandle,
@@ -63,13 +84,14 @@ impl Ch341a {
         Ok(Self { handle })
     }
 
-    /// Sets the D0–D7 output lines to `data`.
-    ///
-    /// Each bit in `data` corresponds to one GPIO line. On the ABACOM relay board:
-    /// - Bit 0 (0x01): A6275 LATCH
-    /// - Bit 3 (0x08): A6275 CLK
-    /// - Bit 5 (0x20): A6275 Serial DATA in
-    pub fn set_output(&self, data: u8) -> Result {
+    /// Performs a USB port reset on the device.
+    pub fn reset(&self) -> Result {
+        Ok(self.handle.reset()?)
+    }
+}
+
+impl Gpio for Ch341a {
+    fn set_output(&self, data: u8) -> Result {
         let msg = [
             0xA1, 0x6a, 0x1f, 0x00, 0x10, data, 0x3f, 0x00, 0x00, 0x00, 0x00,
         ];
@@ -78,11 +100,7 @@ impl Ch341a {
         expect_transfer_len(written, msg.len())
     }
 
-    /// Reads the D0–D7 input lines and returns byte 0 (D7–D0).
-    ///
-    /// On the ABACOM relay board, bit 7 (D7) carries the A6275 serial output,
-    /// used to read back the current shift register contents.
-    pub fn get_input(&self) -> Result<u8> {
+    fn get_input(&self) -> Result<u8> {
         let msg = [0xA0];
         let written = self.handle.write_bulk(ENDPOINT_OUT, &msg, TIMEOUT_WRITE)?;
         expect_transfer_len(written, msg.len())?;
@@ -92,11 +110,6 @@ impl Ch341a {
         expect_transfer_len(len, buf.len())?;
 
         Ok(buf[0])
-    }
-
-    /// Performs a USB port reset on the device.
-    pub fn reset(&self) -> Result {
-        Ok(self.handle.reset()?)
     }
 }
 
