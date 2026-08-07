@@ -54,21 +54,15 @@ impl RelayBoard {
     fn shift_out_bits(&self, status: u8) -> Result {
         self.ch341a.set_output(0)?;
 
-        for i in 0..8 {
-            if (status & (1 << (7 - i))) != 0 {
-                self.ch341a.set_output(DATA)?;
-                self.ch341a.set_output(CLK | DATA)?;
-                self.ch341a.set_output(DATA)?;
-            } else {
-                self.ch341a.set_output(0)?;
-                self.ch341a.set_output(CLK)?;
-                self.ch341a.set_output(0)?;
-            }
+        for bit in (0..8).rev() {
+            let data = if status & (1 << bit) != 0 { DATA } else { 0 };
+
+            self.ch341a.set_output(data)?;
+            self.ch341a.set_output(CLK | data)?;
+            self.ch341a.set_output(data)?;
         }
 
-        self.ch341a.set_output(0)?;
-
-        Ok(())
+        self.ch341a.set_output(0)
     }
 
     /// Shifts `status` into the A6275 and latches it to the relay outputs.
@@ -97,11 +91,9 @@ impl RelayBoard {
 
         self.ch341a.set_output(0)?;
 
-        for i in 0..8 {
-            let input_state = self.ch341a.get_input()?;
-
-            if (input_state & READ) != 0 {
-                result |= 1 << (7 - i);
+        for bit in (0..8).rev() {
+            if self.ch341a.get_input()? & READ != 0 {
+                result |= 1 << bit;
             }
 
             self.ch341a.set_output(CLK)?;
