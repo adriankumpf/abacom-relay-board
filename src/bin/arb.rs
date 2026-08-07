@@ -2,6 +2,8 @@ use clap::{CommandFactory, Parser, value_parser};
 
 use std::io::{self, Write};
 
+use arb::{Relay, Relays};
+
 #[derive(Parser, Debug)]
 #[command(name = "abacom-relay-board (arb)")]
 struct Args {
@@ -33,21 +35,18 @@ fn main() {
     }
 }
 
-/// Converts relay numbers into the bitmask the library expects.
+/// Collects the relay numbers given on the command line.
 ///
-/// Relay `n` is bit `n - 1`. `0` is not a relay and contributes no bits, so
-/// `arb 0` yields an empty mask — which is how "turn everything off" is spelled.
-fn relays_to_mask(relays: &[u8]) -> u8 {
-    relays
+/// `0` is the CLI's way of spelling "turn everything off": it is not a relay, so
+/// it contributes nothing and `arb 0` yields [`Relays::NONE`]. Clap has already
+/// rejected anything outside `0..=8`, so the conversion cannot fail in practice.
+fn requested_relays(numbers: &[u8]) -> arb::Result<Relays> {
+    numbers
         .iter()
         .copied()
-        .filter(|&relay| relay != 0)
-        .fold(0, |mask, relay| mask | 1 << (relay - 1))
-}
-
-/// Returns the numbers of the relays set in `status`, in ascending order.
-fn active_relays(status: u8) -> impl Iterator<Item = u8> {
-    (1..=8u8).filter(move |relay| status & (1 << (relay - 1)) != 0)
+        .filter(|&number| number != 0)
+        .map(Relay::try_from)
+        .collect()
 }
 
 fn run() -> arb::Result {
@@ -59,11 +58,9 @@ fn run() -> arb::Result {
     }
 
     if args.status {
-        let status = arb::get_status(args.port)?;
+        let relays = arb::active_relays(args.port)?;
 
-        let active: Vec<_> = active_relays(status).map(|r| r.to_string()).collect();
-
-        writeln!(io::stdout(), "Active relays: {}", active.join(" "))?;
+        writeln!(io::stdout(), "Active relays: {relays}")?;
 
         return Ok(());
     }
@@ -72,8 +69,8 @@ fn run() -> arb::Result {
         return arb::reset(args.port);
     }
 
-    arb::set_status(
-        relays_to_mask(&args.relays),
+    arb::set_relays(
+        requested_relays(&args.relays)?,
         !args.disable_verification,
         args.port,
     )
@@ -162,47 +159,43 @@ mod tests {
         assert!(parse(&["--reset", "-d"]).is_err());
     }
 
-    fn active(status: u8) -> Vec<u8> {
-        active_relays(status).collect()
+    fn requested(numbers: &[u8]) -> Relays {
+        requested_relays(numbers).unwrap()
     }
 
     #[test]
-    fn relay_n_is_bit_n_minus_one() {
-        // Relay 1 is the least significant bit, relay 8 the most significant.
-        for relay in 1..=8u8 {
-            assert_eq!(relays_to_mask(&[relay]), 1 << (relay - 1));
-            assert_eq!(active(1 << (relay - 1)), vec![relay]);
-        }
+    fn relay_numbers_become_the_matching_relays() {
+        assert_eq!(
+            requested(&[1, 2, 4, 5, 6]),
+            Relay::One | Relay::Two | Relay::Four | Relay::Five | Relay::Six
+        );
     }
 
     #[test]
-    fn relays_combine_into_one_mask() {
-        assert_eq!(relays_to_mask(&[1, 2, 4, 5, 6]), 0b0011_1011);
-        assert_eq!(active(0b0011_1011), vec![1, 2, 4, 5, 6]);
-    }
-
-    #[test]
-    fn all_relays_fill_the_mask() {
-        assert_eq!(relays_to_mask(&[1, 2, 3, 4, 5, 6, 7, 8]), u8::MAX);
-        assert_eq!(active(u8::MAX), vec![1, 2, 3, 4, 5, 6, 7, 8]);
-    }
-
-    #[test]
-    fn an_empty_mask_turns_everything_off() {
-        assert_eq!(relays_to_mask(&[]), 0);
-        assert_eq!(relays_to_mask(&[0]), 0);
-        assert_eq!(active(0), Vec::<u8>::new());
+    fn zero_or_no_relays_turns_everything_off() {
+        assert_eq!(requested(&[0]), Relays::NONE);
+        assert_eq!(requested(&[]), Relays::NONE);
     }
 
     #[test]
     fn relay_zero_is_ignored_beside_other_relays() {
         // `0` only means "all off" on its own; listed alongside real relays it
         // drops out and the others still activate.
-        assert_eq!(relays_to_mask(&[0, 3]), relays_to_mask(&[3]));
+        assert_eq!(requested(&[0, 3]), requested(&[3]));
     }
 
     #[test]
-    fn repeating_a_relay_sets_its_bit_once() {
-        assert_eq!(relays_to_mask(&[3, 3, 3]), 0b0000_0100);
+    fn repeating_a_relay_activates_it_once() {
+        assert_eq!(requested(&[3, 3, 3]), Relay::Three.into());
+    }
+
+    #[test]
+    fn out_of_range_relay_numbers_are_rejected() {
+        // Unreachable through clap, which caps the value at 8, but the conversion
+        // must not silently drop or misplace the relay if that guard ever moves.
+        assert!(matches!(
+            requested_relays(&[9]),
+            Err(arb::Error::InvalidRelay(9))
+        ));
     }
 }

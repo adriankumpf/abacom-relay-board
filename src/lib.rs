@@ -6,29 +6,37 @@
 //!
 //! # Relay addressing
 //!
-//! Relay state is an 8-bit bitmask: bit 0 = relay 1, bit 7 = relay 8, `1` = active.
+//! Relays are named by [`Relay`] and addressed as a set by [`Relays`]. The board
+//! stores that set as an 8-bit shift register mask, with relay 1 in the least
+//! significant bit, but only [`Relays::from_bits`] and [`Relays::bits`] expose it.
 //!
 //! # Examples
 //!
 //! ```no_run
-//! // Activate relays 1 and 3
-//! arb::set_status(0b00000101, true, None).unwrap();
+//! use arb::{Relay, Relays};
 //!
-//! // Read back current state
-//! let status = arb::get_status(None).unwrap();
+//! // Activate relays 1 and 3
+//! arb::set_relays(Relay::One | Relay::Three, true, None).unwrap();
+//!
+//! // Read back the current state
+//! for relay in arb::active_relays(None).unwrap() {
+//!     println!("relay {relay} is active");
+//! }
 //!
 //! // Turn everything off
-//! arb::set_status(0, true, None).unwrap();
+//! arb::set_relays(Relays::NONE, true, None).unwrap();
 //! ```
 
 use rusb::UsbContext;
 
 mod ch341a;
 mod errors;
+mod relays;
 
 use self::ch341a::{Ch341a, Gpio};
 
 pub use self::errors::{Error, Result};
+pub use self::relays::{Iter, Relay, Relays};
 
 // Allegro A6275 pin mapping on the CH341A D0–D7 GPIO lines.
 const LATCH: u8 = 0x01; // D0 → A6275 Latch
@@ -155,9 +163,7 @@ fn find_device(port: Option<u8>) -> Result<ch341a::Device> {
     found.ok_or(Error::NotFound)
 }
 
-/// Returns the current relay state as an 8-bit bitmask.
-///
-/// Bit 0 corresponds to relay 1, bit 7 to relay 8. A set bit means the relay is active.
+/// Returns the relays that are currently active.
 ///
 /// Internally verifies the device is responsive by writing an inverted test pattern to the
 /// shift register (without latching, so relay outputs are not disturbed) and reading it back.
@@ -172,30 +178,47 @@ fn find_device(port: Option<u8>) -> Result<ch341a::Device> {
 /// * [`Error::NotFound`] — no relay board detected
 /// * [`Error::MultipleFound`] — multiple boards detected and `port` is `None`
 /// * [`Error::BadDevice`] — device did not respond correctly to the read-back test
-pub fn get_status(port: Option<u8>) -> Result<u8> {
-    RelayBoard::open(port)?.get_status()
-}
-
-/// Activates the relays specified by `status`.
-///
-/// `status` is an 8-bit bitmask: bit 0 = relay 1, bit 7 = relay 8, `1` = active.
-/// A value of `0` turns off all relays.
-///
-/// # Arguments
-///
-/// * `status` — bitmask of relays to activate.
-/// * `verify` — if `true`, reads back the shift register after latching and returns
-///   [`Error::VerificationFailed`] on mismatch.
-/// * `port` — USB port number to select a specific board when multiple are connected.
 ///
 /// # Example
 ///
 /// ```no_run
-/// // Activate relays 1, 2, 4, 5 and 6
-/// arb::set_status(0b00111011, true, None).unwrap();
+/// let relays = arb::active_relays(None).unwrap();
+///
+/// if relays.contains(arb::Relay::Three) {
+///     println!("relay 3 is active");
+/// }
 /// ```
-pub fn set_status(status: u8, verify: bool, port: Option<u8>) -> Result {
-    RelayBoard::open(port)?.set_status(status, verify)
+pub fn active_relays(port: Option<u8>) -> Result<Relays> {
+    RelayBoard::open(port)?.get_status().map(Relays::from_bits)
+}
+
+/// Activates `relays`, deactivating every relay not in the set.
+///
+/// # Arguments
+///
+/// * `relays` — the relays to activate. [`Relays::NONE`] turns everything off.
+/// * `verify` — if `true`, reads the shift register back after latching and returns
+///   [`Error::VerificationFailed`] on mismatch.
+/// * `port` — USB port number to select a specific board when multiple are connected.
+///
+/// # Errors
+///
+/// * [`Error::NotFound`] — no relay board detected
+/// * [`Error::MultipleFound`] — multiple boards detected and `port` is `None`
+/// * [`Error::VerificationFailed`] — the read-back did not match `relays`
+///
+/// # Example
+///
+/// ```no_run
+/// use arb::Relay;
+///
+/// // Activate relays 1, 2, 4, 5 and 6
+/// let relays = Relay::One | Relay::Two | Relay::Four | Relay::Five | Relay::Six;
+///
+/// arb::set_relays(relays, true, None).unwrap();
+/// ```
+pub fn set_relays(relays: Relays, verify: bool, port: Option<u8>) -> Result {
+    RelayBoard::open(port)?.set_status(relays.bits(), verify)
 }
 
 /// Performs a USB reset on the relay board.
