@@ -26,7 +26,14 @@ struct Args {
     relays: Vec<u8>,
 }
 
-fn main() -> arb::Result {
+fn main() {
+    if let Err(e) = run() {
+        eprintln!("arb: {e}");
+        std::process::exit(1);
+    }
+}
+
+fn run() -> arb::Result {
     let args = Args::parse();
 
     if !args.status && !args.reset && args.relays.is_empty() {
@@ -35,16 +42,11 @@ fn main() -> arb::Result {
     }
 
     if args.status {
-        let result = arb::get_status(args.port)?;
+        let status = arb::get_status(args.port)?;
 
-        let active_relays: Vec<_> = (0..8)
-            .filter_map(|m| {
-                if (1 << m) & result != 0 {
-                    Some((m + 1).to_string())
-                } else {
-                    None
-                }
-            })
+        let active_relays: Vec<_> = (0..8u8)
+            .filter(|bit| status & (1 << bit) != 0)
+            .map(|bit| (bit + 1).to_string())
             .collect();
 
         writeln!(io::stdout(), "Active relays: {}", active_relays.join(" "))?;
@@ -56,14 +58,14 @@ fn main() -> arb::Result {
         return arb::reset(args.port);
     }
 
-    arb::set_status(
-        args.relays
-            .iter()
-            .filter(|&&r| r != 0)
-            .fold(0, |acc, &r| acc | 1 << (r - 1)),
-        !args.disable_verification,
-        args.port,
-    )
+    // Relay `0` means "all off" and contributes no bits.
+    let status = args
+        .relays
+        .iter()
+        .filter(|&&r| r != 0)
+        .fold(0u8, |acc, &r| acc | 1 << (r - 1));
+
+    arb::set_status(status, !args.disable_verification, args.port)
 }
 
 #[cfg(test)]

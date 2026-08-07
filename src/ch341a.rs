@@ -1,4 +1,4 @@
-//! Low-level CH341A USB bulk transfer interface.
+//! Low-level CH341A USB interface.
 //!
 //! The CH341A operates in parallel/GPIO mode. Communication uses two bulk endpoints:
 //! - `ENDPOINT_OUT` (0x02): host-to-device commands
@@ -11,15 +11,23 @@
 
 use std::time::Duration;
 
-use crate::DeviceHandle;
 use crate::errors::{Error, Result};
+
+/// USB vendor ID for the WCH CH341A chip.
+const VENDOR_ID: u16 = 0x1a86;
+/// USB product ID for the CH341A in parallel/GPIO mode.
+const PRODUCT_ID: u16 = 0x5512;
 
 const ENDPOINT_OUT: u8 = 0x02;
 const ENDPOINT_IN: u8 = 0x82;
+/// The interface carrying the two bulk endpoints.
+const INTERFACE: u8 = 0;
 const TIMEOUT_WRITE: Duration = Duration::from_millis(100);
 const TIMEOUT_READ: Duration = Duration::from_millis(10);
-const SET_OUTPUT_MSG_LEN: usize = 11;
 const GET_INPUT_RESPONSE_LEN: usize = 6;
+
+pub type Device = rusb::Device<rusb::Context>;
+type DeviceHandle = rusb::DeviceHandle<rusb::Context>;
 
 fn expect_transfer_len(actual: usize, expected: usize) -> Result {
     if actual == expected {
@@ -29,34 +37,67 @@ fn expect_transfer_len(actual: usize, expected: usize) -> Result {
     Err(Error::UnexpectedTransferLength { expected, actual })
 }
 
-/// Sets the CH341A D0–D7 output lines to `data`.
-///
-/// Each bit in `data` corresponds to one GPIO line. On the ABACOM relay board:
-/// - Bit 0 (0x01): A6275 LATCH
-/// - Bit 3 (0x08): A6275 CLK
-/// - Bit 5 (0x20): A6275 Serial DATA in
-pub fn set_output(handle: &DeviceHandle, data: u8) -> Result {
-    let msg = [
-        0xA1, 0x6a, 0x1f, 0x00, 0x10, data, 0x3f, 0x00, 0x00, 0x00, 0x00,
-    ];
-    let written = handle.write_bulk(ENDPOINT_OUT, &msg, TIMEOUT_WRITE)?;
-    expect_transfer_len(written, SET_OUTPUT_MSG_LEN)?;
-    Ok(())
+/// Returns whether `device` is a CH341A in parallel/GPIO mode.
+pub fn is_ch341a(device: &Device) -> Result<bool> {
+    let dd = device.device_descriptor()?;
+
+    Ok(dd.vendor_id() == VENDOR_ID && dd.product_id() == PRODUCT_ID)
 }
 
-/// Reads the CH341A D0–D7 input lines and returns byte 0 (D7–D0).
-///
-/// On the ABACOM relay board, bit 7 (D7) carries the A6275 serial output,
-/// used to read back the current shift register contents.
-pub fn get_input(handle: &DeviceHandle) -> Result<u8> {
-    let msg = [0xA0];
-    let written = handle.write_bulk(ENDPOINT_OUT, &msg, TIMEOUT_WRITE)?;
-    expect_transfer_len(written, msg.len())?;
+/// An opened CH341A with its bulk interface claimed.
+pub struct Ch341a {
+    handle: DeviceHandle,
+}
 
-    let mut buf = [0u8; GET_INPUT_RESPONSE_LEN];
-    let len = handle.read_bulk(ENDPOINT_IN, &mut buf, TIMEOUT_READ)?;
-    expect_transfer_len(len, GET_INPUT_RESPONSE_LEN)?;
-    Ok(buf[0])
+impl Ch341a {
+    /// Opens `device`, detaching the kernel driver if one is attached.
+    pub fn open(device: &Device) -> Result<Self> {
+        let handle = device.open()?;
+
+        if let Ok(true) = handle.kernel_driver_active(INTERFACE) {
+            handle.detach_kernel_driver(INTERFACE)?;
+        }
+
+        handle.claim_interface(INTERFACE)?;
+
+        Ok(Self { handle })
+    }
+
+    /// Sets the D0–D7 output lines to `data`.
+    ///
+    /// Each bit in `data` corresponds to one GPIO line. On the ABACOM relay board:
+    /// - Bit 0 (0x01): A6275 LATCH
+    /// - Bit 3 (0x08): A6275 CLK
+    /// - Bit 5 (0x20): A6275 Serial DATA in
+    pub fn set_output(&self, data: u8) -> Result {
+        let msg = [
+            0xA1, 0x6a, 0x1f, 0x00, 0x10, data, 0x3f, 0x00, 0x00, 0x00, 0x00,
+        ];
+        let written = self.handle.write_bulk(ENDPOINT_OUT, &msg, TIMEOUT_WRITE)?;
+
+        expect_transfer_len(written, msg.len())
+    }
+
+    /// Reads the D0–D7 input lines and returns byte 0 (D7–D0).
+    ///
+    /// On the ABACOM relay board, bit 7 (D7) carries the A6275 serial output,
+    /// used to read back the current shift register contents.
+    pub fn get_input(&self) -> Result<u8> {
+        let msg = [0xA0];
+        let written = self.handle.write_bulk(ENDPOINT_OUT, &msg, TIMEOUT_WRITE)?;
+        expect_transfer_len(written, msg.len())?;
+
+        let mut buf = [0u8; GET_INPUT_RESPONSE_LEN];
+        let len = self.handle.read_bulk(ENDPOINT_IN, &mut buf, TIMEOUT_READ)?;
+        expect_transfer_len(len, buf.len())?;
+
+        Ok(buf[0])
+    }
+
+    /// Performs a USB port reset on the device.
+    pub fn reset(&self) -> Result {
+        Ok(self.handle.reset()?)
+    }
 }
 
 #[cfg(test)]
