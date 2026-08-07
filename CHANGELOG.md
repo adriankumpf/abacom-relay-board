@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Changed (**breaking**)
+
+- Model relays as types instead of a raw bitmask. `Relay` names a single relay
+  (1–8) and `Relays` a set of them, so the relay-number-to-bit mapping is stated
+  once in the library rather than re-derived by each consumer
+- Rename `get_status` to `active_relays`, now returning `Relays`
+- Rename `set_status` to `set_relays`, now taking `Relays`
+- Replace `set_relays`' `verify: bool` parameter with a `Verify` enum
+
+### Added
+
+- `Error::InvalidRelay` for relay numbers outside 1–8
+
 ### Fixed
 
 - Correct the relay bitmask in the `set_status` documentation example

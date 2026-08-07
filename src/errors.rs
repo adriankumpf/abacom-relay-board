@@ -22,9 +22,13 @@ pub enum Error {
     #[error("multiple relay boards found")]
     MultipleFound,
 
-    /// The relay state read back after `set_status` did not match the requested state.
+    /// The relay state read back after `set_relays` did not match the requested state.
     #[error("verification failed")]
     VerificationFailed,
+
+    /// A relay number outside the 1–8 range the board provides.
+    #[error("invalid relay: expected a number between 1 and 8, got {0}")]
+    InvalidRelay(u8),
 
     /// A USB bulk transfer completed with an unexpected length.
     #[error("unexpected usb transfer length: expected {expected} bytes, got {actual}")]
