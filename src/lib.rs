@@ -26,7 +26,7 @@ use rusb::UsbContext;
 mod ch341a;
 mod errors;
 
-use self::ch341a::Ch341a;
+use self::ch341a::{Ch341a, Gpio};
 
 pub use self::errors::{Error, Result};
 
@@ -36,35 +36,44 @@ const CLK: u8 = 0x08; // D3 → A6275 CLK
 const DATA: u8 = 0x20; // D5 → A6275 Serial in
 const READ: u8 = 0x80; // D7 ← A6275 Serial out
 
-struct RelayBoard {
-    ch341a: Ch341a,
+struct RelayBoard<T> {
+    gpio: T,
 }
 
-impl RelayBoard {
+impl RelayBoard<Ch341a> {
     /// Finds and opens a relay board, optionally restricted to a given USB port.
     fn open(port: Option<u8>) -> Result<Self> {
         let device = find_device(port)?;
 
-        Ok(Self {
-            ch341a: Ch341a::open(&device)?,
-        })
+        Ok(Self::new(Ch341a::open(&device)?))
+    }
+
+    /// Performs a USB reset on the underlying device.
+    fn reset(&self) -> Result {
+        self.gpio.reset()
+    }
+}
+
+impl<T: Gpio> RelayBoard<T> {
+    fn new(gpio: T) -> Self {
+        Self { gpio }
     }
 
     /// Shifts 8 bits into the A6275 shift register (MSB first) without latching.
     ///
     /// Leaves all output lines low.
     fn shift_out_bits(&self, status: u8) -> Result {
-        self.ch341a.set_output(0)?;
+        self.gpio.set_output(0)?;
 
         for bit in (0..8).rev() {
             let data = if status & (1 << bit) != 0 { DATA } else { 0 };
 
-            self.ch341a.set_output(data)?;
-            self.ch341a.set_output(CLK | data)?;
-            self.ch341a.set_output(data)?;
+            self.gpio.set_output(data)?;
+            self.gpio.set_output(CLK | data)?;
+            self.gpio.set_output(data)?;
         }
 
-        self.ch341a.set_output(0)
+        self.gpio.set_output(0)
     }
 
     /// Clocks the 8 bits of the A6275 shift register out of its serial output (D7).
@@ -74,15 +83,15 @@ impl RelayBoard {
     fn read_shift_register(&self) -> Result<u8> {
         let mut status = 0;
 
-        self.ch341a.set_output(0)?;
+        self.gpio.set_output(0)?;
 
         for bit in (0..8).rev() {
-            if self.ch341a.get_input()? & READ != 0 {
+            if self.gpio.get_input()? & READ != 0 {
                 status |= 1 << bit;
             }
 
-            self.ch341a.set_output(CLK)?;
-            self.ch341a.set_output(0)?;
+            self.gpio.set_output(CLK)?;
+            self.gpio.set_output(0)?;
         }
 
         Ok(status)
@@ -95,8 +104,8 @@ impl RelayBoard {
     fn set_status(&self, status: u8, verify: bool) -> Result {
         self.shift_out_bits(status)?;
 
-        self.ch341a.set_output(LATCH)?;
-        self.ch341a.set_output(0)?;
+        self.gpio.set_output(LATCH)?;
+        self.gpio.set_output(0)?;
 
         if verify {
             let read = self.read_shift_register()?;
@@ -126,10 +135,6 @@ impl RelayBoard {
         self.shift_out_bits(status)?;
 
         Ok(status)
-    }
-
-    fn reset(&self) -> Result {
-        self.ch341a.reset()
     }
 }
 
@@ -187,7 +192,7 @@ pub fn get_status(port: Option<u8>) -> Result<u8> {
 ///
 /// ```no_run
 /// // Activate relays 1, 2, 4, 5 and 6
-/// arb::set_status(0b00110111, true, None).unwrap();
+/// arb::set_status(0b00111011, true, None).unwrap();
 /// ```
 pub fn set_status(status: u8, verify: bool, port: Option<u8>) -> Result {
     RelayBoard::open(port)?.set_status(status, verify)
@@ -200,4 +205,167 @@ pub fn set_status(status: u8, verify: bool, port: Option<u8>) -> Result {
 /// * `port` — USB port number to select a specific board when multiple are connected.
 pub fn reset(port: Option<u8>) -> Result {
     RelayBoard::open(port)?.reset()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use super::*;
+
+    /// The register bit presented on the A6275 serial output.
+    const MSB: u8 = 0b1000_0000;
+
+    /// A simulated A6275 driven through the same GPIO lines as the real one.
+    ///
+    /// The register shifts left on each rising CLK edge, taking in the DATA line,
+    /// and presents its most significant bit on the serial output (D7). A rising
+    /// LATCH edge copies the register to the relay outputs.
+    #[derive(Default)]
+    struct FakeA6275 {
+        lines: Cell<u8>,
+        register: Cell<u8>,
+        outputs: Cell<u8>,
+    }
+
+    impl Gpio for FakeA6275 {
+        fn set_output(&self, data: u8) -> Result {
+            let previous = self.lines.replace(data);
+            let rising = |pin: u8| previous & pin == 0 && data & pin != 0;
+
+            if rising(CLK) {
+                let bit = u8::from(data & DATA != 0);
+                self.register.set(self.register.get() << 1 | bit);
+            }
+
+            if rising(LATCH) {
+                self.outputs.set(self.register.get());
+            }
+
+            Ok(())
+        }
+
+        fn get_input(&self) -> Result<u8> {
+            let serial_out = self.register.get() & MSB != 0;
+
+            Ok(if serial_out { READ } else { 0 })
+        }
+    }
+
+    /// A device that never drives its serial output, so every read-back mismatches.
+    struct StuckLow;
+
+    impl Gpio for StuckLow {
+        fn set_output(&self, _data: u8) -> Result {
+            Ok(())
+        }
+
+        fn get_input(&self) -> Result<u8> {
+            Ok(0)
+        }
+    }
+
+    fn fake() -> RelayBoard<FakeA6275> {
+        RelayBoard::new(FakeA6275::default())
+    }
+
+    #[test]
+    fn shift_out_then_read_round_trips_every_value() {
+        for status in 0..=u8::MAX {
+            let board = fake();
+
+            board.shift_out_bits(status).unwrap();
+
+            assert_eq!(board.read_shift_register().unwrap(), status);
+        }
+    }
+
+    #[test]
+    fn bits_are_shifted_out_most_significant_first() {
+        // Pins the direction directly at the register, without routing through
+        // `read_shift_register`: clocking `0b1000_0000` out least-significant-first
+        // would leave it in the register as `0b0000_0001`.
+        let board = fake();
+
+        board.shift_out_bits(0b1000_0000).unwrap();
+
+        assert_eq!(board.gpio.register.get(), 0b1000_0000);
+    }
+
+    #[test]
+    fn reading_the_register_leaves_it_empty() {
+        let board = fake();
+        board.shift_out_bits(0b1011_0010).unwrap();
+
+        board.read_shift_register().unwrap();
+
+        assert_eq!(board.gpio.register.get(), 0);
+    }
+
+    #[test]
+    fn shifting_bits_out_never_latches_the_outputs() {
+        let board = fake();
+        board.gpio.outputs.set(0b1010_1010);
+
+        board.shift_out_bits(0b0101_0101).unwrap();
+
+        assert_eq!(board.gpio.outputs.get(), 0b1010_1010);
+    }
+
+    #[test]
+    fn set_status_latches_the_requested_relays() {
+        let board = fake();
+
+        board.set_status(0b0011_0111, true).unwrap();
+
+        assert_eq!(board.gpio.outputs.get(), 0b0011_0111);
+        // Verification reads the register destructively, so it has to be restored.
+        assert_eq!(board.gpio.register.get(), 0b0011_0111);
+    }
+
+    #[test]
+    fn set_status_reports_a_read_back_mismatch() {
+        let err = RelayBoard::new(StuckLow)
+            .set_status(0b0000_0001, true)
+            .unwrap_err();
+
+        assert!(matches!(err, Error::VerificationFailed));
+    }
+
+    #[test]
+    fn set_status_skips_the_read_back_when_not_verifying() {
+        assert!(
+            RelayBoard::new(StuckLow)
+                .set_status(0b0000_0001, false)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn get_status_returns_the_latched_relays() {
+        let board = fake();
+        board.set_status(0b0011_0111, false).unwrap();
+
+        assert_eq!(board.get_status().unwrap(), 0b0011_0111);
+    }
+
+    #[test]
+    fn get_status_leaves_the_board_as_it_found_it() {
+        let board = fake();
+        board.set_status(0b1100_1001, false).unwrap();
+
+        board.get_status().unwrap();
+
+        // The health check must neither latch its test pattern nor consume the
+        // register contents it read.
+        assert_eq!(board.gpio.outputs.get(), 0b1100_1001);
+        assert_eq!(board.gpio.register.get(), 0b1100_1001);
+    }
+
+    #[test]
+    fn get_status_reports_an_unresponsive_device() {
+        let err = RelayBoard::new(StuckLow).get_status().unwrap_err();
+
+        assert!(matches!(err, Error::BadDevice));
+    }
 }

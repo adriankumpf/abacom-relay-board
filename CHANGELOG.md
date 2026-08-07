@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Correct the relay bitmask in the `set_status` documentation example
+
 ## [0.7.1] - 2026-04-02
 
 ### Fixed
