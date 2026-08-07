@@ -51,6 +51,8 @@ impl RelayBoard {
     }
 
     /// Shifts 8 bits into the A6275 shift register (MSB first) without latching.
+    ///
+    /// Leaves all output lines low.
     fn shift_out_bits(&self, status: u8) -> Result {
         self.ch341a.set_output(0)?;
 
@@ -65,45 +67,65 @@ impl RelayBoard {
         self.ch341a.set_output(0)
     }
 
-    /// Shifts `status` into the A6275 and latches it to the relay outputs.
+    /// Clocks the 8 bits of the A6275 shift register out of its serial output (D7).
     ///
-    /// If `verify` is true, reads back the shift register and returns
-    /// [`Error::VerificationFailed`] if it doesn't match.
-    fn set_status(&self, status: u8, verify: bool) -> Result {
-        self.ch341a.set_output(0)?;
-
-        self.shift_out_bits(status)?;
-
-        self.ch341a.set_output(LATCH)?;
-        self.ch341a.set_output(0)?;
-
-        if verify && self.get_status()? != status {
-            return Err(Error::VerificationFailed);
-        }
-
-        Ok(())
-    }
-
-    /// Reads the current A6275 shift register contents by clocking out 8 bits
-    /// from the serial output (D7), then restores the register to the read value.
-    fn get_status(&self) -> Result<u8> {
-        let mut result = 0;
+    /// Destructive: reading shifts zeros in, so the caller must restore the register
+    /// with [`RelayBoard::shift_out_bits`] if its contents still matter.
+    fn read_shift_register(&self) -> Result<u8> {
+        let mut status = 0;
 
         self.ch341a.set_output(0)?;
 
         for bit in (0..8).rev() {
             if self.ch341a.get_input()? & READ != 0 {
-                result |= 1 << bit;
+                status |= 1 << bit;
             }
 
             self.ch341a.set_output(CLK)?;
             self.ch341a.set_output(0)?;
         }
 
-        // Restore the shift register (clocking zeros in during read destroyed it).
-        self.shift_out_bits(result)?;
+        Ok(status)
+    }
 
-        Ok(result)
+    /// Shifts `status` into the A6275 and latches it to the relay outputs.
+    ///
+    /// If `verify` is true, reads back the shift register and returns
+    /// [`Error::VerificationFailed`] if it doesn't match.
+    fn set_status(&self, status: u8, verify: bool) -> Result {
+        self.shift_out_bits(status)?;
+
+        self.ch341a.set_output(LATCH)?;
+        self.ch341a.set_output(0)?;
+
+        if verify {
+            let read = self.read_shift_register()?;
+            self.shift_out_bits(read)?;
+
+            if read != status {
+                return Err(Error::VerificationFailed);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Reads the current relay state, checking that the device is responsive.
+    fn get_status(&self) -> Result<u8> {
+        let status = self.read_shift_register()?;
+        let test_status = !status;
+
+        // Health check: write an inverted test pattern to the shift register without
+        // latching, so the relay outputs are left untouched, and read it back.
+        self.shift_out_bits(test_status)?;
+
+        if self.read_shift_register()? != test_status {
+            return Err(Error::BadDevice);
+        }
+
+        self.shift_out_bits(status)?;
+
+        Ok(status)
     }
 
     fn reset(&self) -> Result {
@@ -146,20 +168,7 @@ fn find_device(port: Option<u8>) -> Result<ch341a::Device> {
 /// * [`Error::MultipleFound`] — multiple boards detected and `port` is `None`
 /// * [`Error::BadDevice`] — device did not respond correctly to the read-back test
 pub fn get_status(port: Option<u8>) -> Result<u8> {
-    let relay_board = RelayBoard::open(port)?;
-
-    let old_status = relay_board.get_status()?;
-    let test_status = !old_status;
-    relay_board.shift_out_bits(test_status)?;
-    let status = relay_board.get_status()?;
-
-    if status != test_status {
-        return Err(Error::BadDevice);
-    }
-
-    relay_board.shift_out_bits(old_status)?;
-
-    Ok(old_status)
+    RelayBoard::open(port)?.get_status()
 }
 
 /// Activates the relays specified by `status`.
