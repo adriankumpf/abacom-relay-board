@@ -18,7 +18,6 @@ const ENDPOINT_OUT: u8 = 0x02;
 const ENDPOINT_IN: u8 = 0x82;
 const TIMEOUT_WRITE: Duration = Duration::from_millis(100);
 const TIMEOUT_READ: Duration = Duration::from_millis(10);
-const SET_OUTPUT_MSG_LEN: usize = 11;
 const GET_INPUT_RESPONSE_LEN: usize = 6;
 
 fn expect_transfer_len(actual: usize, expected: usize) -> Result {
@@ -40,8 +39,8 @@ pub fn set_output(handle: &DeviceHandle, data: u8) -> Result {
         0xA1, 0x6a, 0x1f, 0x00, 0x10, data, 0x3f, 0x00, 0x00, 0x00, 0x00,
     ];
     let written = handle.write_bulk(ENDPOINT_OUT, &msg, TIMEOUT_WRITE)?;
-    expect_transfer_len(written, SET_OUTPUT_MSG_LEN)?;
-    Ok(())
+
+    expect_transfer_len(written, msg.len())
 }
 
 /// Reads the CH341A D0–D7 input lines and returns byte 0 (D7–D0).
@@ -55,7 +54,8 @@ pub fn get_input(handle: &DeviceHandle) -> Result<u8> {
 
     let mut buf = [0u8; GET_INPUT_RESPONSE_LEN];
     let len = handle.read_bulk(ENDPOINT_IN, &mut buf, TIMEOUT_READ)?;
-    expect_transfer_len(len, GET_INPUT_RESPONSE_LEN)?;
+    expect_transfer_len(len, buf.len())?;
+
     Ok(buf[0])
 }
 
