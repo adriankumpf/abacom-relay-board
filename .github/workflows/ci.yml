@@ -54,3 +54,9 @@ jobs:
       # The crate is a library by default and only builds the CLI with
       # `build-binary`, so the default feature set needs linting of its own.
       - run: cargo clippy --locked --all-targets -- -D warnings
+
+      # Rustdoc reports broken intra-doc links as warnings, so without `-D` they
+      # land silently -- the docs still build and publish, just with dead links.
+      - run: cargo doc --locked --no-deps --features=build-binary
+        env:
+          RUSTDOCFLAGS: -D warnings
