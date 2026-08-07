@@ -30,7 +30,7 @@ cargo test --features=build-binary
 ```
 
 Tests run against a simulated A6275 (`FakeA6275` in `src/lib.rs`), so no hardware
-is needed.
+is needed. CI runs fmt, both clippy feature sets, and the tests.
 
 ## Architecture
 
