@@ -26,7 +26,14 @@ struct Args {
     relays: Vec<u8>,
 }
 
-fn main() -> arb::Result {
+fn main() {
+    if let Err(e) = run() {
+        eprintln!("arb: {e}");
+        std::process::exit(1);
+    }
+}
+
+fn run() -> arb::Result {
     let args = Args::parse();
 
     if !args.status && !args.reset && args.relays.is_empty() {
