@@ -26,12 +26,9 @@ use rusb::UsbContext;
 mod ch341a;
 mod errors;
 
-pub use self::errors::{Error, Result};
+use self::ch341a::Ch341a;
 
-/// USB vendor ID for the WCH CH341A chip.
-const VENDOR_ID: u16 = 0x1a86;
-/// USB product ID for the CH341A in parallel/GPIO mode.
-const PRODUCT_ID: u16 = 0x5512;
+pub use self::errors::{Error, Result};
 
 // Allegro A6275 pin mapping on the CH341A D0–D7 GPIO lines.
 const LATCH: u8 = 0x01; // D0 → A6275 Latch
@@ -39,47 +36,37 @@ const CLK: u8 = 0x08; // D3 → A6275 CLK
 const DATA: u8 = 0x20; // D5 → A6275 Serial in
 const READ: u8 = 0x80; // D7 ← A6275 Serial out
 
-type DeviceHandle = rusb::DeviceHandle<rusb::Context>;
-type Device = rusb::Device<rusb::Context>;
-
 struct RelayBoard {
-    handle: DeviceHandle,
+    ch341a: Ch341a,
 }
 
 impl RelayBoard {
     /// Finds and opens a relay board, optionally restricted to a given USB port.
     fn open(port: Option<u8>) -> Result<Self> {
-        const EP_IFACE: u8 = 0;
-
         let device = find_device(port)?;
-        let handle = device.open()?;
 
-        if let Ok(true) = handle.kernel_driver_active(EP_IFACE) {
-            handle.detach_kernel_driver(EP_IFACE)?;
-        }
-
-        handle.claim_interface(EP_IFACE)?;
-
-        Ok(Self { handle })
+        Ok(Self {
+            ch341a: Ch341a::open(&device)?,
+        })
     }
 
     /// Shifts 8 bits into the A6275 shift register (MSB first) without latching.
     fn shift_out_bits(&self, status: u8) -> Result {
-        ch341a::set_output(&self.handle, 0)?;
+        self.ch341a.set_output(0)?;
 
         for i in 0..8 {
             if (status & (1 << (7 - i))) != 0 {
-                ch341a::set_output(&self.handle, DATA)?;
-                ch341a::set_output(&self.handle, CLK | DATA)?;
-                ch341a::set_output(&self.handle, DATA)?;
+                self.ch341a.set_output(DATA)?;
+                self.ch341a.set_output(CLK | DATA)?;
+                self.ch341a.set_output(DATA)?;
             } else {
-                ch341a::set_output(&self.handle, 0)?;
-                ch341a::set_output(&self.handle, CLK)?;
-                ch341a::set_output(&self.handle, 0)?;
+                self.ch341a.set_output(0)?;
+                self.ch341a.set_output(CLK)?;
+                self.ch341a.set_output(0)?;
             }
         }
 
-        ch341a::set_output(&self.handle, 0)?;
+        self.ch341a.set_output(0)?;
 
         Ok(())
     }
@@ -89,12 +76,12 @@ impl RelayBoard {
     /// If `verify` is true, reads back the shift register and returns
     /// [`Error::VerificationFailed`] if it doesn't match.
     fn set_status(&self, status: u8, verify: bool) -> Result {
-        ch341a::set_output(&self.handle, 0)?;
+        self.ch341a.set_output(0)?;
 
         self.shift_out_bits(status)?;
 
-        ch341a::set_output(&self.handle, LATCH)?;
-        ch341a::set_output(&self.handle, 0)?;
+        self.ch341a.set_output(LATCH)?;
+        self.ch341a.set_output(0)?;
 
         if verify && self.get_status()? != status {
             return Err(Error::VerificationFailed);
@@ -108,17 +95,17 @@ impl RelayBoard {
     fn get_status(&self) -> Result<u8> {
         let mut result = 0;
 
-        ch341a::set_output(&self.handle, 0)?;
+        self.ch341a.set_output(0)?;
 
         for i in 0..8 {
-            let input_state = ch341a::get_input(&self.handle)?;
+            let input_state = self.ch341a.get_input()?;
 
             if (input_state & READ) != 0 {
                 result |= 1 << (7 - i);
             }
 
-            ch341a::set_output(&self.handle, CLK)?;
-            ch341a::set_output(&self.handle, 0)?;
+            self.ch341a.set_output(CLK)?;
+            self.ch341a.set_output(0)?;
         }
 
         // Restore the shift register (clocking zeros in during read destroyed it).
@@ -128,23 +115,16 @@ impl RelayBoard {
     }
 
     fn reset(&self) -> Result {
-        Ok(self.handle.reset()?)
+        self.ch341a.reset()
     }
 }
 
-/// Returns whether `device` is the CH341A the relay board is built around.
-fn is_relay_board(device: &Device) -> Result<bool> {
-    let dd = device.device_descriptor()?;
-
-    Ok(dd.vendor_id() == VENDOR_ID && dd.product_id() == PRODUCT_ID)
-}
-
-fn find_device(port: Option<u8>) -> Result<Device> {
+fn find_device(port: Option<u8>) -> Result<ch341a::Device> {
     let context = rusb::Context::new()?;
     let mut found = None;
 
     for device in context.devices()?.iter() {
-        if is_relay_board(&device)? && port.is_none_or(|p| device.port_number() == p) {
+        if ch341a::is_ch341a(&device)? && port.is_none_or(|p| device.port_number() == p) {
             if found.is_some() {
                 return Err(Error::MultipleFound);
             }
