@@ -2,7 +2,7 @@ use clap::{CommandFactory, Parser, value_parser};
 
 use std::io::{self, Write};
 
-use arb::{Relay, Relays};
+use arb::{Relay, Relays, Verify};
 
 #[derive(Parser, Debug)]
 #[command(name = "abacom-relay-board (arb)")]
@@ -69,11 +69,13 @@ fn run() -> arb::Result {
         return arb::reset(args.port);
     }
 
-    arb::set_relays(
-        requested_relays(&args.relays)?,
-        !args.disable_verification,
-        args.port,
-    )
+    let verify = if args.disable_verification {
+        Verify::Disabled
+    } else {
+        Verify::Enabled
+    };
+
+    arb::set_relays(requested_relays(&args.relays)?, verify, args.port)
 }
 
 #[cfg(test)]

@@ -13,10 +13,10 @@
 //! # Examples
 //!
 //! ```no_run
-//! use arb::{Relay, Relays};
+//! use arb::{Relay, Relays, Verify};
 //!
 //! // Activate relays 1 and 3
-//! arb::set_relays(Relay::One | Relay::Three, true, None).unwrap();
+//! arb::set_relays(Relay::One | Relay::Three, Verify::Enabled, None).unwrap();
 //!
 //! // Read back the current state
 //! for relay in arb::active_relays(None).unwrap() {
@@ -24,7 +24,7 @@
 //! }
 //!
 //! // Turn everything off
-//! arb::set_relays(Relays::NONE, true, None).unwrap();
+//! arb::set_relays(Relays::NONE, Verify::Enabled, None).unwrap();
 //! ```
 
 use rusb::UsbContext;
@@ -37,6 +37,16 @@ use self::ch341a::{Ch341a, Gpio};
 
 pub use self::errors::{Error, Result};
 pub use self::relays::{Iter, Relay, Relays};
+
+/// Whether [`set_relays`] reads the shift register back to confirm the write.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Verify {
+    /// Read the shift register back and fail on a mismatch.
+    #[default]
+    Enabled,
+    /// Latch the relays without confirming.
+    Disabled,
+}
 
 // Allegro A6275 pin mapping on the CH341A D0–D7 GPIO lines.
 const LATCH: u8 = 0x01; // D0 → A6275 Latch
@@ -107,15 +117,15 @@ impl<T: Gpio> RelayBoard<T> {
 
     /// Shifts `status` into the A6275 and latches it to the relay outputs.
     ///
-    /// If `verify` is true, reads back the shift register and returns
+    /// If `verify` is [`Verify::Enabled`], reads back the shift register and returns
     /// [`Error::VerificationFailed`] if it doesn't match.
-    fn set_status(&self, status: u8, verify: bool) -> Result {
+    fn set_status(&self, status: u8, verify: Verify) -> Result {
         self.shift_out_bits(status)?;
 
         self.gpio.set_output(LATCH)?;
         self.gpio.set_output(0)?;
 
-        if verify {
+        if verify == Verify::Enabled {
             let read = self.read_shift_register()?;
             self.shift_out_bits(read)?;
 
@@ -197,7 +207,7 @@ pub fn active_relays(port: Option<u8>) -> Result<Relays> {
 /// # Arguments
 ///
 /// * `relays` — the relays to activate. [`Relays::NONE`] turns everything off.
-/// * `verify` — if `true`, reads the shift register back after latching and returns
+/// * `verify` — whether to read the shift register back after latching and return
 ///   [`Error::VerificationFailed`] on mismatch.
 /// * `port` — USB port number to select a specific board when multiple are connected.
 ///
@@ -210,14 +220,14 @@ pub fn active_relays(port: Option<u8>) -> Result<Relays> {
 /// # Example
 ///
 /// ```no_run
-/// use arb::Relay;
+/// use arb::{Relay, Verify};
 ///
 /// // Activate relays 1, 2, 4, 5 and 6
 /// let relays = Relay::One | Relay::Two | Relay::Four | Relay::Five | Relay::Six;
 ///
-/// arb::set_relays(relays, true, None).unwrap();
+/// arb::set_relays(relays, Verify::Enabled, None).unwrap();
 /// ```
-pub fn set_relays(relays: Relays, verify: bool, port: Option<u8>) -> Result {
+pub fn set_relays(relays: Relays, verify: Verify, port: Option<u8>) -> Result {
     RelayBoard::open(port)?.set_status(relays.bits(), verify)
 }
 
@@ -339,7 +349,7 @@ mod tests {
     fn set_status_latches_the_requested_relays() {
         let board = fake();
 
-        board.set_status(0b0011_0111, true).unwrap();
+        board.set_status(0b0011_0111, Verify::Enabled).unwrap();
 
         assert_eq!(board.gpio.outputs.get(), 0b0011_0111);
         // Verification reads the register destructively, so it has to be restored.
@@ -349,7 +359,7 @@ mod tests {
     #[test]
     fn set_status_reports_a_read_back_mismatch() {
         let err = RelayBoard::new(StuckLow)
-            .set_status(0b0000_0001, true)
+            .set_status(0b0000_0001, Verify::Enabled)
             .unwrap_err();
 
         assert!(matches!(err, Error::VerificationFailed));
@@ -359,7 +369,7 @@ mod tests {
     fn set_status_skips_the_read_back_when_not_verifying() {
         assert!(
             RelayBoard::new(StuckLow)
-                .set_status(0b0000_0001, false)
+                .set_status(0b0000_0001, Verify::Disabled)
                 .is_ok()
         );
     }
@@ -367,7 +377,7 @@ mod tests {
     #[test]
     fn get_status_returns_the_latched_relays() {
         let board = fake();
-        board.set_status(0b0011_0111, false).unwrap();
+        board.set_status(0b0011_0111, Verify::Disabled).unwrap();
 
         assert_eq!(board.get_status().unwrap(), 0b0011_0111);
     }
@@ -375,7 +385,7 @@ mod tests {
     #[test]
     fn get_status_leaves_the_board_as_it_found_it() {
         let board = fake();
-        board.set_status(0b1100_1001, false).unwrap();
+        board.set_status(0b1100_1001, Verify::Disabled).unwrap();
 
         board.get_status().unwrap();
 

@@ -9,6 +9,7 @@
   once in the library rather than re-derived by each consumer
 - Rename `get_status` to `active_relays`, now returning `Relays`
 - Rename `set_status` to `set_relays`, now taking `Relays`
+- Replace `set_relays`' `verify: bool` parameter with a `Verify` enum
 
 ### Added
 
