@@ -55,9 +55,13 @@ const OUTPUT_LINES: u8 = 0x3f;
 /// The CH341A's packet size. A UIO stream has to fit in one.
 const PACKET_LENGTH: usize = 0x20;
 
-/// The most samples one stream can take: three states each, after the command,
-/// the two states that open the stream and the terminator.
-const MAX_SAMPLES: usize = (PACKET_LENGTH - 4) / 3;
+/// What one sample costs a stream: read, clock high, clock low.
+const STATES_PER_SAMPLE: usize = 3;
+
+/// The most samples one stream can take, in what is left of a packet once the
+/// command, the two states that open the stream and the terminator are accounted
+/// for.
+const MAX_SAMPLES: usize = (PACKET_LENGTH - 4) / STATES_PER_SAMPLE;
 
 pub type Device = rusb::Device<rusb::Context>;
 type DeviceHandle = rusb::DeviceHandle<rusb::Context>;
@@ -68,13 +72,6 @@ fn expect_transfer_len(actual: usize, expected: usize) -> Result<()> {
     }
 
     Err(Error::UnexpectedTransferLength { expected, actual })
-}
-
-/// Sends `msg` to the device, failing if it was not transferred whole.
-fn write_msg(handle: &DeviceHandle, msg: &[u8]) -> Result<()> {
-    let written = handle.write_bulk(ENDPOINT_OUT, msg, TIMEOUT_WRITE)?;
-
-    expect_transfer_len(written, msg.len())
 }
 
 /// Encodes the UIO stream behind [`Gpio::sample_clocked`].
@@ -88,13 +85,14 @@ fn write_msg(handle: &DeviceHandle, msg: &[u8]) -> Result<()> {
 /// Returns the packet and the number of bytes used.
 fn sample_stream(clock: u8, samples: usize) -> ([u8; PACKET_LENGTH], usize) {
     let mut packet = [0u8; PACKET_LENGTH];
-    let end = 3 + samples * 3;
 
     packet[0] = CMD_UIO_STREAM;
     packet[1] = UIO_STM_OUT; // every line low, `clock` included
     packet[2] = UIO_STM_DIR | OUTPUT_LINES;
 
-    for states in packet[3..end].chunks_exact_mut(3) {
+    let end = 3 + samples * STATES_PER_SAMPLE;
+
+    for states in packet[3..end].chunks_exact_mut(STATES_PER_SAMPLE) {
         states.copy_from_slice(&[UIO_STM_IN, UIO_STM_OUT | clock, UIO_STM_OUT]);
     }
 
@@ -173,6 +171,20 @@ impl Ch341a {
     pub fn reset(&self) -> Result<()> {
         Ok(self.handle.reset()?)
     }
+
+    /// Sends `msg` to the device, failing if it was not transferred whole.
+    fn write(&self, msg: &[u8]) -> Result<()> {
+        let written = self.handle.write_bulk(ENDPOINT_OUT, msg, TIMEOUT_WRITE)?;
+
+        expect_transfer_len(written, msg.len())
+    }
+
+    /// Fills `buf` from the device, failing if it was not transferred whole.
+    fn read(&self, buf: &mut [u8]) -> Result<()> {
+        let read = self.handle.read_bulk(ENDPOINT_IN, buf, TIMEOUT_READ)?;
+
+        expect_transfer_len(read, buf.len())
+    }
 }
 
 impl Gpio for Ch341a {
@@ -182,21 +194,18 @@ impl Gpio for Ch341a {
             0xA1, 0x6a, 0x1f, 0x00, 0x10, data, OUTPUT_LINES, 0x00, 0x00, 0x00, 0x00,
         ];
 
-        write_msg(&self.handle, &msg)
+        self.write(&msg)
     }
 
     fn sample_clocked<const N: usize>(&self, clock: u8) -> Result<[u8; N]> {
         const { assert!(N <= MAX_SAMPLES, "a UIO stream must fit one packet") };
 
         let (packet, len) = sample_stream(clock, N);
-        write_msg(&self.handle, &packet[..len])?;
+        self.write(&packet[..len])?;
 
         // One byte per `UIO_STM_IN`, in the order the stream ran them.
         let mut samples = [0u8; N];
-        let read = self
-            .handle
-            .read_bulk(ENDPOINT_IN, &mut samples, TIMEOUT_READ)?;
-        expect_transfer_len(read, N)?;
+        self.read(&mut samples)?;
 
         Ok(samples)
     }

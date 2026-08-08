@@ -537,15 +537,13 @@ mod tests {
     }
 
     #[test]
-    fn reading_the_register_costs_two_transfers() {
+    fn the_protocol_costs_the_transfers_it_should() {
         // The point of the clocked read: 33 transfers as one write and one read per
         // bit, 2 as a single stream. At the measured ~41 µs per transfer that is
-        // 1.4 ms against 0.1 ms, and it is why `get_status` below is 56 and not 118.
+        // 1.4 ms against 0.1 ms, and it is why the two totals below are 56 and not
+        // 87 and 118.
         assert_eq!(transfers(|board| board.read_shift_register()), 2);
-    }
 
-    #[test]
-    fn the_protocol_costs_the_transfers_it_should() {
         // Writing is still one transfer per line change: 8 bits × 3 states, plus the
         // low state either side. It stays that way deliberately: the CH341A emits
         // stream states faster than the DATA line settles, so a batched write clocks
