@@ -140,8 +140,8 @@ impl Relays {
     ///
     /// assert_eq!(relays.iter().map(Relay::number).collect::<Vec<_>>(), [1, 2, 4, 5, 6]);
     /// ```
-    pub fn iter(self) -> Iter {
-        Iter {
+    pub fn iter(self) -> RelayIter {
+        RelayIter {
             relays: self,
             remaining: Relay::ALL.into_iter(),
         }
@@ -149,12 +149,12 @@ impl Relays {
 }
 
 /// An iterator over the relays in a [`Relays`], in ascending order.
-pub struct Iter {
+pub struct RelayIter {
     relays: Relays,
     remaining: array::IntoIter<Relay, 8>,
 }
 
-impl Iterator for Iter {
+impl Iterator for RelayIter {
     type Item = Relay;
 
     fn next(&mut self) -> Option<Relay> {
@@ -170,7 +170,7 @@ impl Iterator for Iter {
     }
 }
 
-impl ExactSizeIterator for Iter {
+impl ExactSizeIterator for RelayIter {
     fn len(&self) -> usize {
         self.remaining
             .as_slice()
@@ -180,7 +180,7 @@ impl ExactSizeIterator for Iter {
     }
 }
 
-impl FusedIterator for Iter {}
+impl FusedIterator for RelayIter {}
 
 impl From<Relay> for Relays {
     fn from(relay: Relay) -> Self {
@@ -198,9 +198,9 @@ impl FromIterator<Relay> for Relays {
 
 impl IntoIterator for Relays {
     type Item = Relay;
-    type IntoIter = Iter;
+    type IntoIter = RelayIter;
 
-    fn into_iter(self) -> Iter {
+    fn into_iter(self) -> RelayIter {
         self.iter()
     }
 }

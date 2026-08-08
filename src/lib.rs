@@ -40,7 +40,7 @@ mod relays;
 use self::ch341a::{Ch341a, Gpio};
 
 pub use self::errors::{Error, Result};
-pub use self::relays::{Iter, Relay, Relays};
+pub use self::relays::{Relay, RelayIter, Relays};
 
 /// Whether [`Board::set_relays`] reads the shift register back to confirm the write.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -71,7 +71,7 @@ impl<T: Gpio> A6275<T> {
     /// Shifts 8 bits into the A6275 shift register (MSB first) without latching.
     ///
     /// Leaves all output lines low.
-    fn shift_out_bits(&self, status: u8) -> Result {
+    fn shift_out_bits(&self, status: u8) -> Result<()> {
         self.gpio.set_output(0)?;
 
         for bit in (0..8).rev() {
@@ -110,7 +110,7 @@ impl<T: Gpio> A6275<T> {
     ///
     /// If `verify` is [`Verify::Enabled`], reads back the shift register and returns
     /// [`Error::VerificationFailed`] if it doesn't match.
-    fn set_status(&self, status: u8, verify: Verify) -> Result {
+    fn set_status(&self, status: u8, verify: Verify) -> Result<()> {
         self.shift_out_bits(status)?;
 
         self.gpio.set_output(LATCH)?;
@@ -321,7 +321,7 @@ mod tests {
     }
 
     impl Gpio for FakeA6275 {
-        fn set_output(&self, data: u8) -> Result {
+        fn set_output(&self, data: u8) -> Result<()> {
             let previous = self.lines.replace(data);
             let rising = |pin: u8| previous & pin == 0 && data & pin != 0;
 
@@ -348,7 +348,7 @@ mod tests {
     struct StuckLow;
 
     impl Gpio for StuckLow {
-        fn set_output(&self, _data: u8) -> Result {
+        fn set_output(&self, _data: u8) -> Result<()> {
             Ok(())
         }
 

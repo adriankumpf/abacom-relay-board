@@ -37,6 +37,14 @@
   provided. No library path could produce it: it existed only so the CLI could
   use `arb::Result` for its own stdout writes, which every consumer then had to
   handle as an unreachable variant. The CLI now uses `Box<dyn Error>`
+- Mark `Error` as `#[non_exhaustive]`, so that future variants can be added
+  without another breaking release. Downstream `match`es need a wildcard arm
+- Remove the default type parameter from `Result`, which is now written
+  `Result<()>` rather than a bare `Result`. The default made rustdoc render the
+  return type of `set_relays` and `reset_device` as `Result`, with no way to
+  tell what it resolved to
+- Rename the `Iter` re-export to `RelayIter`. `arb::Iter` was too vague a name
+  for the crate root
 
 ### Added
 
