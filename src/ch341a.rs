@@ -96,14 +96,14 @@ impl Ch341a {
             Err(e) => return Err(e.into()),
         }
 
-        // Reported on its own rather than as a USB error: the board is fine, someone
-        // else is simply mid-call on it. Any kernel driver has been detached by the
-        // claim itself, so contention is all this can mean here.
-        match handle.claim_interface(INTERFACE) {
-            Ok(()) => Ok(Self { handle }),
-            Err(rusb::Error::Busy) => Err(Error::Busy),
-            Err(e) => Err(e.into()),
-        }
+        // `Busy` here means the interface is already claimed, which is contention
+        // rather than a USB fault, so it is reported as its own error.
+        handle.claim_interface(INTERFACE).map_err(|e| match e {
+            rusb::Error::Busy => Error::Busy,
+            e => e.into(),
+        })?;
+
+        Ok(Self { handle })
     }
 
     /// Performs a USB port reset on the device.

@@ -270,9 +270,7 @@ impl Board {
     /// * [`Error::NotFound`] — no relay board detected
     /// * [`Error::MultipleFound`] — multiple boards detected and no port was given
     /// * [`Error::Busy`] — another application is talking to the board
-    /// * [`Error::VerificationFailed`] — the read-back did not match `relays`, which
-    ///   carries both sets. The relays were latched first, so their physical state
-    ///   is unknown
+    /// * [`Error::VerificationFailed`] — the read-back did not match `relays`
     ///
     /// # Example
     ///
@@ -304,9 +302,6 @@ impl Board {
     }
 
     /// Finds the board and claims its CH341A interface for the duration of one call.
-    ///
-    /// The claim is exclusive, so this is where a board busy with another
-    /// application is reported.
     fn claim(&self) -> Result<Ch341a> {
         Ch341a::open(&find_device(&self.usb.0, self.port)?)
     }
@@ -448,11 +443,12 @@ mod tests {
             .set_status(0b1010_0110, Verify::Enabled)
             .unwrap_err();
 
-        assert!(matches!(
-            err,
-            Error::VerificationFailed { expected, actual }
-                if expected == Relays::from_bits(0b1010_0110) && actual == Relays::NONE
-        ));
+        let Error::VerificationFailed { expected, actual } = err else {
+            panic!("expected a verification failure, got {err:?}");
+        };
+
+        assert_eq!(expected, Relays::from_bits(0b1010_0110));
+        assert_eq!(actual, Relays::NONE);
     }
 
     #[test]

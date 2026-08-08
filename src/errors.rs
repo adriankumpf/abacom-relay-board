@@ -28,9 +28,9 @@ pub enum Error {
     ///
     /// Expected rather than exceptional: the interface is claimed exclusively, but
     /// only for the duration of a single call, so a board shared between
-    /// applications produces this whenever two calls overlap. Retrying is the
-    /// remedy — unlike [`Error::Usb`], which it used to arrive as, this says
-    /// nothing is wrong with the board.
+    /// applications produces this whenever two calls overlap. Unlike
+    /// [`Error::Usb`], it says nothing is wrong with the board; retrying is the
+    /// remedy.
     #[error("the relay board is in use by another application")]
     Busy,
 
@@ -38,9 +38,8 @@ pub enum Error {
     ///
     /// The relays were latched before the read-back, so the physical relay state is
     /// unknown: `expected`, `actual` or neither. Read the board back to find out.
-    ///
-    /// Rendered with the sets' `Debug` rather than their `Display`, so that "no
-    /// relays" reads as `{}` instead of as nothing at all.
+    // `Debug`, not `Display`, so that an empty set reads as `{}` rather than as
+    // nothing at all.
     #[error("verification failed: expected {expected:?}, read back {actual:?}")]
     VerificationFailed {
         /// The relays that were requested.
@@ -61,9 +60,8 @@ pub enum Error {
     /// through the shift register.
     ///
     /// The pattern is written without latching, so the relays were never touched
-    /// and their physical state is unchanged — only the read path is suspect. This
-    /// is the difference from [`Error::VerificationFailed`], where the relays were
-    /// latched before the disagreement was noticed.
+    /// and only the read path is suspect. That is the difference from
+    /// [`Error::VerificationFailed`], which leaves their physical state unknown.
     #[error("self-test failed")]
     SelfTestFailed,
 }

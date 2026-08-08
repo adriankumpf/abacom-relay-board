@@ -54,14 +54,15 @@
   distinct because the recovery differs: `SelfTestFailed` writes its test pattern
   without latching, so the relays were never touched, whereas
   `VerificationFailed` latched first and leaves their physical state unknown
+- Report a board held by another application as the new `Error::Busy` rather than
+  as `Error::Usb(rusb::Error::Busy)`, which made it indistinguishable from a real
+  USB fault even though it is a normal and retryable condition on a shared board.
+  Breaking for callers: a `match` arm on `Error::Usb(rusb::Error::Busy)` stops
+  firing and falls through to the wildcard `#[non_exhaustive]` already requires
 
 ### Added
 
 - `Error::InvalidRelay` for relay numbers outside 1–8
-- `Error::Busy` for a board whose USB interface another application currently
-  holds. It previously arrived as `Error::Usb(rusb::Error::Busy)`, indistinguishable
-  from a real USB fault, even though it is a normal and retryable condition on a
-  board shared between applications
 
 ### Fixed
 
