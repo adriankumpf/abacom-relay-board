@@ -1,10 +1,14 @@
 use thiserror::Error;
 
-/// A result type that defaults to the unit type for convenience.
-pub type Result<T = ()> = std::result::Result<T, Error>;
+/// A result type for the `arb` library.
+pub type Result<T> = std::result::Result<T, Error>;
 
 /// Errors returned by the `arb` library.
+///
+/// Non-exhaustive: match with a wildcard arm, so that new variants can be added
+/// without breaking callers.
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum Error {
     /// USB communication error (from `rusb`).
     #[error("{0}")]

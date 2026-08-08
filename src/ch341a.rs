@@ -36,7 +36,7 @@ const GET_INPUT_RESPONSE_LEN: usize = 6;
 pub type Device = rusb::Device<rusb::Context>;
 type DeviceHandle = rusb::DeviceHandle<rusb::Context>;
 
-fn expect_transfer_len(actual: usize, expected: usize) -> Result {
+fn expect_transfer_len(actual: usize, expected: usize) -> Result<()> {
     if actual == expected {
         return Ok(());
     }
@@ -63,7 +63,7 @@ pub trait Gpio {
     /// - Bit 0 (0x01): A6275 LATCH
     /// - Bit 3 (0x08): A6275 CLK
     /// - Bit 5 (0x20): A6275 Serial DATA in
-    fn set_output(&self, data: u8) -> Result;
+    fn set_output(&self, data: u8) -> Result<()>;
 
     /// Reads the D0–D7 input lines and returns byte 0 (D7–D0).
     ///
@@ -99,13 +99,13 @@ impl Ch341a {
     }
 
     /// Performs a USB port reset on the device.
-    pub fn reset(&self) -> Result {
+    pub fn reset(&self) -> Result<()> {
         Ok(self.handle.reset()?)
     }
 }
 
 impl Gpio for Ch341a {
-    fn set_output(&self, data: u8) -> Result {
+    fn set_output(&self, data: u8) -> Result<()> {
         let msg = [
             0xA1, 0x6a, 0x1f, 0x00, 0x10, data, 0x3f, 0x00, 0x00, 0x00, 0x00,
         ];
