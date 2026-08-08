@@ -47,6 +47,7 @@ use self::ch341a::Ch341a;
 use self::find::{Select, find_device, find_devices};
 
 pub use self::errors::{Error, Result};
+pub use self::find::Location;
 pub use self::relays::{Relay, RelayIter, Relays};
 
 /// Whether [`Board::set_relays`] reads the shift register back to confirm the write.
@@ -143,11 +144,35 @@ impl Usb {
     pub fn boards(&self) -> Result<Vec<Board>> {
         Ok(find_devices(&self.0)?
             .into_keys()
-            .map(|path| Board {
-                usb: self.clone(),
-                select: Select::Path(path),
-            })
+            .map(|location| self.board_at(location))
             .collect())
+    }
+
+    /// Returns the board at `location`, wherever it is plugged in.
+    ///
+    /// The way back from [`Board::location`]: a board found by [`Usb::boards`] can
+    /// be written down and named again later, which naming it by port cannot do,
+    /// since a port number is only unique among one hub's ports. Like
+    /// [`Usb::board`], this resolves nothing and cannot fail.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use arb::{Location, Usb};
+    ///
+    /// let usb = Usb::new()?;
+    ///
+    /// // `1-1.3` is what `boards()` printed the last time this ran
+    /// let board = usb.board_at("1-1.3".parse::<Location>()?);
+    ///
+    /// println!("{}", board.relays()?);
+    /// # Ok::<(), arb::Error>(())
+    /// ```
+    pub fn board_at(&self, location: Location) -> Board {
+        Board {
+            usb: self.clone(),
+            select: Select::At(location),
+        }
     }
 }
 
@@ -191,6 +216,29 @@ impl Board {
     /// Use [`Display`](fmt::Display) to tell two boards apart.
     pub fn port(&self) -> Option<u8> {
         self.select.port()
+    }
+
+    /// Returns where this board sits on the USB tree, if it names one board.
+    ///
+    /// `Some` for a board from [`Usb::boards`] or [`Usb::board_at`], and `None` for
+    /// one from [`Usb::board`], which names a port rather than a board and so has
+    /// nothing stable to report. This is the identifier [`Board::port`] is not:
+    /// store it, and [`Usb::board_at`] resolves it back to the same board across
+    /// restarts and across the re-enumeration a `reset_device` causes.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// let usb = arb::Usb::new()?;
+    ///
+    /// for board in usb.boards()? {
+    ///     // e.g. `1-1.3` — write it down, and `board_at` names this board again
+    ///     println!("{}", board.location().expect("enumerated"));
+    /// }
+    /// # Ok::<(), arb::Error>(())
+    /// ```
+    pub fn location(&self) -> Option<&Location> {
+        self.select.location()
     }
 
     /// Returns the relays that are currently active.
@@ -289,9 +337,12 @@ impl Board {
     }
 }
 
-/// Names which board this is: `port 3 (bus 1, path 1.3)` for one from
-/// [`Usb::boards`], which tells apart two boards sharing a port number, `port 3` for
-/// `usb.board(Some(3))`, and `any board` for `usb.board(None)`.
+/// Names which board this is: `port 3 (1-1.3)` for one from [`Usb::boards`], which
+/// tells apart two boards sharing a port number, `port 3` for `usb.board(Some(3))`,
+/// and `any board` for `usb.board(None)`.
+///
+/// The parenthesised half is the [`Location`], in the spelling
+/// [`Usb::board_at`] parses back.
 impl fmt::Display for Board {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.select.fmt(f)

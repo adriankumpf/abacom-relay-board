@@ -50,6 +50,13 @@ pub enum Error {
     #[error("invalid relay: expected a number between 1 and 8, got {0}")]
     InvalidRelay(u8),
 
+    /// A string that does not spell a [`Location`](crate::Location).
+    ///
+    /// Carries the input rather than a parser's own message, because the thing a
+    /// caller needs to see is the configuration value that did not take.
+    #[error("invalid board location: expected a bus and port path like `1-1.3`, got `{0}`")]
+    InvalidLocation(String),
+
     /// A USB bulk transfer completed with an unexpected length.
     #[error("unexpected usb transfer length: expected {expected} bytes, got {actual}")]
     UnexpectedTransferLength { expected: usize, actual: usize },

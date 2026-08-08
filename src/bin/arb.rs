@@ -2,8 +2,53 @@ use clap::{ArgGroup, CommandFactory, Parser, value_parser};
 
 use std::error::Error;
 use std::io::{self, Write};
+use std::str::FromStr;
 
-use arb::{Relay, Relays, Verify};
+use arb::{Location, Relay, Relays, Usb, Verify};
+
+/// Which board `--port` names.
+///
+/// A bare number is a port, exactly as before. Anything else is parsed as a
+/// [`Location`], so the `port 3 (1-1.3)` that `--list` prints can be fed straight
+/// back in — otherwise `--list` could name a board the CLI had no way to address.
+/// The two never collide: a location always contains a `-`, so it can never parse
+/// as a port number.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Target {
+    Port(u8),
+    At(Location),
+}
+
+impl FromStr for Target {
+    // A `String` rather than `arb::Error`, so that a number too large to be a port
+    // can be answered as the port it was meant to be rather than as the location it
+    // is not: `arb --port 256` wants "port numbers run from 0 to 255", not advice
+    // about writing `1-1.3`.
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, String> {
+        if let Ok(port) = s.parse::<u8>() {
+            return Ok(Target::Port(port));
+        }
+
+        if !s.is_empty() && s.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err(format!("port numbers run from 0 to 255, got `{s}`"));
+        }
+
+        s.parse()
+            .map(Target::At)
+            .map_err(|e: arb::Error| e.to_string())
+    }
+}
+
+impl Target {
+    fn board(self, usb: &Usb) -> arb::Board {
+        match self {
+            Target::Port(port) => usb.board(Some(port)),
+            Target::At(location) => usb.board_at(location),
+        }
+    }
+}
 
 // The modes are mutually exclusive, which a group states once rather than pairwise
 // on each of them. `disable_verification` and `port` are modifiers, not modes, so
@@ -28,9 +73,9 @@ struct Args {
     #[arg(short, long, conflicts_with_all = ["status", "list", "reset"])]
     disable_verification: bool,
 
-    /// Custom USB Port
-    #[arg(short, long)]
-    port: Option<u8>,
+    /// Which board: a port number, or a location like `1-1.3` from --list
+    #[arg(short, long, value_name = "PORT|LOCATION")]
+    port: Option<Target>,
 
     /// The relays to activate
     #[arg(value_name = "RELAYS", value_parser = value_parser!(u8).range(0..=8))]
@@ -71,7 +116,7 @@ fn run() -> Result<(), Box<dyn Error>> {
 
     // After the help branch: initialising libusb here would make a bare `arb`
     // fail with a USB error instead of printing its help.
-    let usb = arb::Usb::new()?;
+    let usb = Usb::new()?;
 
     if args.list {
         // No board prints nothing rather than erroring, so the output stays
@@ -83,7 +128,10 @@ fn run() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
-    let board = usb.board(args.port);
+    let board = match args.port {
+        Some(target) => target.board(&usb),
+        None => usb.board(None),
+    };
 
     if args.status {
         // The library keeps the check off the read path for callers that read
@@ -183,7 +231,49 @@ mod tests {
     #[test]
     fn port_option() {
         let args = parse(&["--port", "3", "1"]).unwrap();
-        assert_eq!(args.port, Some(3));
+        assert_eq!(args.port, Some(Target::Port(3)));
+    }
+
+    #[test]
+    fn port_option_accepts_a_location() {
+        // `--list` prints `port 3 (1-1.3)`; the parenthesised half has to be
+        // something `--port` takes, or listing names a board you cannot address.
+        let args = parse(&["--port", "1-1.3", "--status"]).unwrap();
+
+        assert_eq!(args.port, Some(Target::At("1-1.3".parse().unwrap())));
+    }
+
+    #[test]
+    fn a_bare_number_is_still_a_port() {
+        // The disambiguation rule, pinned: no location parses as a port and no
+        // port as a location, because a location always carries a `-`.
+        assert_eq!("3".parse::<Target>().unwrap(), Target::Port(3));
+        assert_eq!("255".parse::<Target>().unwrap(), Target::Port(255));
+
+        assert!(matches!("1-3".parse::<Target>().unwrap(), Target::At(_)));
+    }
+
+    #[test]
+    fn port_option_rejects_nonsense() {
+        assert!(parse(&["--port", "256", "--status"]).is_err());
+        assert!(parse(&["--port", "1-", "--status"]).is_err());
+        assert!(parse(&["--port", "eth0", "--status"]).is_err());
+        assert!(parse(&["--port", "", "--status"]).is_err());
+    }
+
+    #[test]
+    fn an_out_of_range_port_is_answered_as_a_port() {
+        // 256 is neither a port nor a location. Falling through to the location
+        // parser would answer it with advice about writing `1-1.3`, which is not
+        // what someone who typed a number was reaching for.
+        let error = "256".parse::<Target>().unwrap_err();
+
+        assert!(error.contains("port numbers run from 0 to 255"), "{error}");
+
+        // A location is still answered as a location.
+        let error = "1-".parse::<Target>().unwrap_err();
+
+        assert!(error.contains("invalid board location"), "{error}");
     }
 
     #[test]

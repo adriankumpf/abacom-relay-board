@@ -33,6 +33,12 @@ Code holding raw masks converts at the boundary with `Relays::from_bits(u8)` and
 `Relay::One | Relay::Three`, or `collect()` from an iterator of `Relay`;
 `Relays::iter()` is the way back out.
 
+Code that configures *which* board — a port number in an environment variable,
+say — is better served by a `Location`. A port number is only unique among one
+hub's ports, so it names a board only as long as nothing moves; `usb.boards()`
+hands out locations that do not collide, and `usb.board_at("1-1.3".parse()?)`
+names one again after a restart.
+
 ### Changed (**breaking**)
 
 - Replace the three free functions with two types: `Usb`, a libusb context, and
@@ -121,11 +127,23 @@ Code holding raw masks converts at the boundary with `Relays::from_bits(u8)` and
   matches on port alone, exactly as before, with `MultipleFound` the answer to a
   collision and `boards()` the way out. An empty list means no board is attached
   rather than `Error::NotFound`
+- `Location`, `Board::location()` and `Usb::board_at()` — the way to write down
+  which board you mean and get it back. Enumeration hands out boards that are
+  unambiguous precisely because they carry a bus-and-hub path, but until now that
+  path was crate-private, so a caller could list boards and print them and still
+  had nothing but the ambiguous port number to store. `Location` round-trips
+  through the `1-1.3` spelling `lsusb -t` uses, so a board found once can be put
+  in a configuration file and named again after a restart. It survives the
+  re-enumeration a `reset_device()` causes, which a device address would not
 - `Board::port()`, so a caller can label the board it got, and `Display for
-  Board`, which renders an enumerated board as `port 3 (bus 1, path 1.3)` —
-  enough to tell apart two boards that share a port number
+  Board`, which renders an enumerated board as `port 3 (1-1.3)` — enough to tell
+  apart two boards that share a port number, and the parenthesised half is what
+  `Usb::board_at()` parses back
 - `arb --list`, which prints one line per attached board. Prints nothing when
-  there is none, so the output stays readable line by line
+  there is none, so the output stays readable line by line. `--port` accepts
+  either a port number or a location, so what `--list` prints can be fed straight
+  back in
+- `Error::InvalidLocation` for a string that does not spell a `Location`
 - `Board::self_test()`, the read-back check that `Board::relays` used to perform
   on the way past. It moves no relay, so it is safe to call on a live board
 - `Error::InvalidRelay` for relay numbers outside 1–8
