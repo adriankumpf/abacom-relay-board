@@ -59,6 +59,10 @@
   USB fault even though it is a normal and retryable condition on a shared board.
   Breaking for callers: a `match` arm on `Error::Usb(rusb::Error::Busy)` stops
   firing and falls through to the wildcard `#[non_exhaustive]` already requires
+- Render `Relays::NONE` as `none` rather than as the empty string. `Display` is
+  what error messages and `arb --status` interpolate, and an empty set previously
+  rendered as nothing at all — `Active relays: ` — which reads as a bug rather
+  than as "no relays"
 
 ### Added
 

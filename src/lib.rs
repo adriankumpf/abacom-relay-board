@@ -443,6 +443,11 @@ mod tests {
             .set_status(0b1010_0110, Verify::Enabled)
             .unwrap_err();
 
+        assert_eq!(
+            err.to_string(),
+            "verification failed: expected 2 3 6 8, read back none"
+        );
+
         let Error::VerificationFailed { expected, actual } = err else {
             panic!("expected a verification failure, got {err:?}");
         };

@@ -38,9 +38,7 @@ pub enum Error {
     ///
     /// The relays were latched before the read-back, so the physical relay state is
     /// unknown: `expected`, `actual` or neither. Read the board back to find out.
-    // `Debug`, not `Display`, so that an empty set reads as `{}` rather than as
-    // nothing at all.
-    #[error("verification failed: expected {expected:?}, read back {actual:?}")]
+    #[error("verification failed: expected {expected}, read back {actual}")]
     VerificationFailed {
         /// The relays that were requested.
         expected: Relays,

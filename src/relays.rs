@@ -241,9 +241,17 @@ impl BitOrAssign for Relays {
     }
 }
 
-/// Renders the active relay numbers, separated by spaces.
+/// Renders the active relay numbers, separated by spaces, or `none` if no relay
+/// is active.
+///
+/// The empty set is spelled out rather than rendered as the empty string, so that
+/// it reads as a value wherever it is interpolated.
 impl fmt::Display for Relays {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.is_empty() {
+            return f.write_str("none");
+        }
+
         for (i, relay) in self.iter().enumerate() {
             if i > 0 {
                 f.write_str(" ")?;
@@ -380,7 +388,7 @@ mod tests {
     #[test]
     fn display_lists_the_active_relay_numbers() {
         assert_eq!(Relays::from_bits(0b0011_1011).to_string(), "1 2 4 5 6");
-        assert_eq!(Relays::NONE.to_string(), "");
+        assert_eq!(Relays::NONE.to_string(), "none");
         assert_eq!(Relays::ALL.to_string(), "1 2 3 4 5 6 7 8");
     }
 
