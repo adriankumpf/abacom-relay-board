@@ -35,13 +35,14 @@ is needed. CI runs fmt, the tests, both clippy feature sets, and `cargo doc` wit
 
 ## Architecture
 
-Five-layer design — `Usb` finds, `Board` is the device, `A6275` is the protocol, `Ch341a` is the wire:
+Six-layer design — `Usb` finds, `Board` is the device, `A6275` is the protocol, `Ch341a` is the wire:
 
-1. **Public API** (`src/lib.rs`) — `Usb` is a libusb context and finds boards; `usb.board(port)` returns a `Board`, which has `relays()`, `set_relays()`, `self_test()` and `reset_device()`. The optional USB port number disambiguates multiple boards.
+1. **Public API** (`src/lib.rs`) — `Usb` is a libusb context and finds boards; `usb.board(port)` returns a `Board`, which has `relays()`, `set_relays()`, `self_test()`, `reset_device()` and `port()`. The optional USB port number disambiguates multiple boards, and `usb.boards()` enumerates them all.
 2. **Relay addressing** (`src/relays.rs`) — `Relay` (one relay, 1–8) and `Relays` (a set of them). `Relay::bit()` is the only place the relay-number-to-bit mapping is written down.
-3. **Shift register protocol** (`src/lib.rs`) — `A6275<T: Gpio>` clocks bits in and out. Private, and the only layer the tests exercise directly.
-4. **CH341A protocol** (`src/ch341a.rs`) — Low-level USB bulk transfers via `rusb`. No `unsafe` code. Exposes `set_output()` and `sample_clocked()` through the `Gpio` trait, which lets the shift register protocol be tested without hardware.
-5. **CLI** (`src/bin/arb.rs`) — `clap`-derived argument parser. Only compiled with `build-binary` feature.
+3. **Board selection** (`src/find.rs`) — `Path` (where a board sits on the USB tree) and `Select` (which board a `Board` names). `find_devices()` enumerates, `find_device()` resolves one. Crate-private.
+4. **Shift register protocol** (`src/lib.rs`) — `A6275<T: Gpio>` clocks bits in and out. Private, like `Path`/`Select`: both are exercised by the tests directly, since neither needs hardware.
+5. **CH341A protocol** (`src/ch341a.rs`) — Low-level USB bulk transfers via `rusb`. No `unsafe` code. Exposes `set_output()` and `sample_clocked()` through the `Gpio` trait, which lets the shift register protocol be tested without hardware.
+6. **CLI** (`src/bin/arb.rs`) — `clap`-derived argument parser. Only compiled with `build-binary` feature.
 
 Error types live in `src/errors.rs` using `thiserror`.
 
@@ -53,6 +54,7 @@ Error types live in `src/errors.rs` using `thiserror`.
 - USB device identified by vendor `0x1a86` / product `0x5512`
 - `Verify::Enabled` makes `Board::set_relays()` read back the shift register after latching and compare
 - `Board::relays()` is a plain read; `Board::self_test()` is the separate health check, which writes an inverted test pattern to the shift register (without latching), verifies the read-back and restores the register. It costs as much again as a read, which is why it is not on the read path
-- `Usb::new()` is expensive (~6.5 ms, almost entirely `libusb_init`) and everything else per call is ~50 µs, so a context is meant to be created once and kept. `Board` holds a port selector, never a resolved device or a claim: it finds and claims per call, so it never locks another application out of a shared board
+- `Usb::new()` is expensive (~6.5 ms, almost entirely `libusb_init`) and everything else per call is ~50 µs, so a context is meant to be created once and kept. `Board` holds a private `Select` — any board, a port number, or a full bus-and-hub `Path` — never a resolved device or a claim: it finds and claims per call, so it never locks another application out of a shared board
+- A USB port number is the board's port on its *parent hub*, so it is not unique across hubs. `usb.board(Some(p))` matches on it anyway (`MultipleFound` is the honest answer to a collision); `usb.boards()` selects by `Path` instead, so enumerated boards never collide
 - `0` is a CLI-only spelling of "all off" — the library has no such relay. Keep that sentinel in `src/bin/arb.rs`
 - Requires system `libusb` at compile time
