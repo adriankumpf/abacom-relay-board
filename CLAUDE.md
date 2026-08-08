@@ -96,4 +96,6 @@ The library is atomic *within* a call but not *between* calls: `relays()` follow
 
 ## Consumers
 
-[arb-ex](https://github.com/adriankumpf/arb-ex) is the only Rust-level consumer and pins a git tag, so every tag bump costs a coordinated Elixir release — batch breaking changes into one release rather than paying repeatedly. It must hold one `Usb` for the whole BEAM node (that is where the ~6.5 ms/call saving is) in something swappable, since a reused context no longer self-heals: after repeated failures the holder drops it and builds a new one.
+[arb-ex](https://github.com/adriankumpf/arb-ex) is the only Rust-level consumer and pins a git tag, so every tag bump costs a coordinated Elixir release — batch breaking changes into one release rather than paying repeatedly.
+
+A `Usb` must be *held* rather than rebuilt per call — that is where the ~6.5 ms/call saving is — but **one per node is the wrong shape to recommend**: the saving is per call, not per context, so one context per process that drives a board captures all of it. A few contexts cost a few ms once at boot and a couple of file descriptors, and they put the context in the hands of the process that experiences the failures and therefore has to rebuild it. Recommend per-node sharing only where boards outnumber the processes driving them. Either way it has to live somewhere swappable, since a reused context no longer self-heals — and the rebuild trigger is *any* failed operation, not a threshold, because no error reliably identifies a soured context.
