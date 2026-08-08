@@ -18,6 +18,9 @@
 ### Fixed
 
 - Correct the relay bitmask in the `set_status` documentation example
+- Raise the USB bulk read timeout from 10 ms to 1000 ms, matching the write
+  timeout. Ten milliseconds for a USB round trip is tight enough to fail
+  spuriously on a loaded host or through a hub, and nothing retries behind it
 
 ## [0.7.1] - 2026-04-02
 

@@ -22,8 +22,15 @@ const ENDPOINT_OUT: u8 = 0x02;
 const ENDPOINT_IN: u8 = 0x82;
 /// The interface carrying the two bulk endpoints.
 const INTERFACE: u8 = 0;
-const TIMEOUT_WRITE: Duration = Duration::from_millis(100);
-const TIMEOUT_READ: Duration = Duration::from_millis(10);
+/// Deadlines for a single bulk transfer.
+///
+/// Nothing retries behind these, so a tight deadline turns a slow round trip —
+/// a loaded host, or a hub between us and the board — into a hard failure
+/// without buying anything. flashrom drives the same chip through one 1000 ms
+/// timeout on both of its endpoints: "1000 ms is plenty and we have no backup
+/// strategy anyway".
+const TIMEOUT_WRITE: Duration = Duration::from_millis(1000);
+const TIMEOUT_READ: Duration = Duration::from_millis(1000);
 const GET_INPUT_RESPONSE_LEN: usize = 6;
 
 pub type Device = rusb::Device<rusb::Context>;
