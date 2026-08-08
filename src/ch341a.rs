@@ -22,8 +22,15 @@ const ENDPOINT_OUT: u8 = 0x02;
 const ENDPOINT_IN: u8 = 0x82;
 /// The interface carrying the two bulk endpoints.
 const INTERFACE: u8 = 0;
-const TIMEOUT_WRITE: Duration = Duration::from_millis(100);
-const TIMEOUT_READ: Duration = Duration::from_millis(10);
+/// Deadlines for a single bulk transfer.
+///
+/// Nothing retries behind these, so a tight deadline turns a slow round trip —
+/// a loaded host, or a hub between us and the board — into a hard failure
+/// without buying anything. flashrom drives the same chip through one 1000 ms
+/// timeout on both of its endpoints: "1000 ms is plenty and we have no backup
+/// strategy anyway".
+const TIMEOUT_WRITE: Duration = Duration::from_millis(1000);
+const TIMEOUT_READ: Duration = Duration::from_millis(1000);
 const GET_INPUT_RESPONSE_LEN: usize = 6;
 
 pub type Device = rusb::Device<rusb::Context>;
@@ -71,12 +78,19 @@ pub struct Ch341a {
 }
 
 impl Ch341a {
-    /// Opens `device`, detaching the kernel driver if one is attached.
+    /// Opens `device` and claims its bulk interface.
+    ///
+    /// Any kernel driver bound to the interface is detached when the interface
+    /// is claimed and re-attached when it is released, so the board is left as
+    /// it was found. Platforms whose libusb lacks that capability report
+    /// `NotSupported` and are ignored: rusb then behaves as if the call had
+    /// never been made, and there is no kernel driver to detach there anyway.
     pub fn open(device: &Device) -> Result<Self> {
         let handle = device.open()?;
 
-        if let Ok(true) = handle.kernel_driver_active(INTERFACE) {
-            handle.detach_kernel_driver(INTERFACE)?;
+        match handle.set_auto_detach_kernel_driver(true) {
+            Ok(()) | Err(rusb::Error::NotSupported) => {}
+            Err(e) => return Err(e.into()),
         }
 
         handle.claim_interface(INTERFACE)?;
