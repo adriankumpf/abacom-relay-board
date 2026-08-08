@@ -86,6 +86,19 @@
 
 ### Added
 
+- `Usb::boards()`, which returns every attached board in a stable order — there
+  was previously no way to enumerate, and a host with four boards is a real
+  configuration. Each is named internally by where it sits on the USB tree rather
+  than by port number, which is only unique among one hub's ports, so an
+  enumerated board always resolves to the board it came from. `usb.board(Some(3))`
+  still matches on port alone, exactly as before, with `MultipleFound` the answer
+  to a collision and `boards()` the way out. An empty list means no board is
+  attached rather than `Error::NotFound`
+- `Board::port()`, so a caller can label the board it got, and `Display for
+  Board`, which renders one as `port 3 (bus 1, path 1.3)` — enough to tell apart
+  two boards that share a port number
+- `arb --list`, which prints one line per attached board. Prints nothing when
+  there is none, so the output stays readable line by line
 - `Board::self_test()`, the read-back check that `Board::relays` used to perform
   on the way past. It moves no relay, so it is safe to call on a live board
 - `Error::InvalidRelay` for relay numbers outside 1–8

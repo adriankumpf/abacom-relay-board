@@ -34,13 +34,15 @@
 //! board.set_relays(Relays::NONE, Verify::Enabled).unwrap();
 //! ```
 
-use rusb::UsbContext;
+use std::fmt;
 
 mod ch341a;
 mod errors;
+mod find;
 mod relays;
 
 use self::ch341a::{Ch341a, Gpio};
+use self::find::{Select, find_device, find_devices};
 
 pub use self::errors::{Error, Result};
 pub use self::relays::{Relay, RelayIter, Relays};
@@ -160,22 +162,6 @@ impl<T: Gpio> A6275<T> {
     }
 }
 
-fn find_device(context: &rusb::Context, port: Option<u8>) -> Result<ch341a::Device> {
-    let mut found = None;
-
-    for device in context.devices()?.iter() {
-        if ch341a::is_ch341a(&device)? && port.is_none_or(|p| device.port_number() == p) {
-            if found.is_some() {
-                return Err(Error::MultipleFound);
-            }
-
-            found = Some(device);
-        }
-    }
-
-    found.ok_or(Error::NotFound)
-}
-
 /// A libusb context: how relay boards are found.
 ///
 /// Initialising it is by far the most expensive part of talking to a board, so
@@ -213,14 +199,58 @@ impl Usb {
     /// this cannot fail and a [`Board`] may outlive — or predate — the device it
     /// names.
     ///
+    /// A port number is the board's port on the hub it is plugged into, so it is
+    /// unique only among that hub's ports: two boards behind two hubs can both be
+    /// on port 3, and this then resolves to [`Error::MultipleFound`].
+    /// [`Usb::boards`] is the way out, and names each board unambiguously.
+    ///
     /// # Arguments
     ///
     /// * `port` — USB port number to select a specific board when multiple are connected.
     pub fn board(&self, port: Option<u8>) -> Board {
+        let select = match port {
+            Some(port) => Select::Port(port),
+            None => Select::Any,
+        };
+
         Board {
             usb: self.clone(),
-            port,
+            select,
         }
+    }
+
+    /// Returns every attached relay board, in a stable order.
+    ///
+    /// Each [`Board`] names one specific device by where it sits on the USB tree
+    /// rather than by port, so enumeration never hands back the ambiguity described
+    /// on [`Usb::board`]. They are otherwise the lazy boards it returns: nothing is
+    /// opened, nothing is claimed, and each is resolved afresh per call — so one may
+    /// stop resolving if its board is unplugged.
+    ///
+    /// An empty vector means no board is attached. Enumeration answering "none" is
+    /// not a failure, so this does not return [`Error::NotFound`].
+    ///
+    /// # Errors
+    ///
+    /// * [`Error::Usb`] — the USB device list could not be read
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// let usb = arb::Usb::new().unwrap();
+    ///
+    /// for board in usb.boards().unwrap() {
+    ///     println!("{board}: {}", board.relays().unwrap());
+    /// }
+    /// ```
+    pub fn boards(&self) -> Result<Vec<Board>> {
+        Ok(find_devices(&self.0)?
+            .into_keys()
+            .map(|path| Board {
+                usb: self.clone(),
+                select: Select::Path(path),
+            })
+            .collect())
     }
 }
 
@@ -233,10 +263,20 @@ impl Usb {
 #[derive(Clone, Debug)]
 pub struct Board {
     usb: Usb,
-    port: Option<u8>,
+    select: Select,
 }
 
 impl Board {
+    /// Returns the USB port this board is named by, if it names one.
+    ///
+    /// A label, not an identifier: boards from [`Usb::boards`] always have one, but
+    /// feeding it back to [`Usb::board`] can be ambiguous where the enumerated board
+    /// is not. `None` only for `usb.board(None)`, which names no particular board.
+    /// Use [`Display`](fmt::Display) to tell two boards apart.
+    pub fn port(&self) -> Option<u8> {
+        self.select.port()
+    }
+
     /// Returns the relays that are currently active.
     ///
     /// Takes the shift register at its word: [`Board::self_test`] is the separate
@@ -329,7 +369,16 @@ impl Board {
 
     /// Finds the board and claims its CH341A interface for the duration of one call.
     fn claim(&self) -> Result<Ch341a> {
-        Ch341a::open(&find_device(&self.usb.0, self.port)?)
+        Ch341a::open(&find_device(&self.usb.0, &self.select)?)
+    }
+}
+
+/// Names which board this is: `port 3 (bus 1, path 1.3)` for one from
+/// [`Usb::boards`], which tells apart two boards sharing a port number, `port 3` for
+/// `usb.board(Some(3))`, and `any board` for `usb.board(None)`.
+impl fmt::Display for Board {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.select.fmt(f)
     }
 }
 

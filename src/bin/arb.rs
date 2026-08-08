@@ -1,23 +1,31 @@
-use clap::{CommandFactory, Parser, value_parser};
+use clap::{ArgGroup, CommandFactory, Parser, value_parser};
 
 use std::error::Error;
 use std::io::{self, Write};
 
 use arb::{Relay, Relays, Verify};
 
+// The modes are mutually exclusive, which a group states once rather than pairwise
+// on each of them. `disable_verification` and `port` are modifiers, not modes, so
+// they name the modes they do not apply to.
 #[derive(Parser, Debug)]
 #[command(name = "abacom-relay-board (arb)")]
+#[command(group(ArgGroup::new("mode").args(["status", "list", "reset", "relays"])))]
 struct Args {
     /// Gets relays status
-    #[arg(short, long, conflicts_with_all = ["relays", "reset", "disable_verification"])]
+    #[arg(short, long)]
     status: bool,
 
+    /// Lists the attached relay boards
+    #[arg(short, long, conflicts_with = "port")]
+    list: bool,
+
     /// Performs a USB reset on the relay board
-    #[arg(short, long, conflicts_with_all = ["relays", "disable_verification"])]
+    #[arg(short, long)]
     reset: bool,
 
     /// Disables the verification after activating relays
-    #[arg(short, long)]
+    #[arg(short, long, conflicts_with_all = ["status", "list", "reset"])]
     disable_verification: bool,
 
     /// Custom USB Port
@@ -56,14 +64,26 @@ fn requested_relays(numbers: &[u8]) -> arb::Result<Relays> {
 fn run() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
-    if !args.status && !args.reset && args.relays.is_empty() {
+    if !args.status && !args.list && !args.reset && args.relays.is_empty() {
         Args::command().print_help()?;
         std::process::exit(2);
     }
 
     // After the help branch: initialising libusb here would make a bare `arb`
     // fail with a USB error instead of printing its help.
-    let board = arb::Usb::new()?.board(args.port);
+    let usb = arb::Usb::new()?;
+
+    if args.list {
+        // No board prints nothing rather than erroring, so the output stays
+        // something a script can read line by line.
+        for board in usb.boards()? {
+            writeln!(io::stdout(), "{board}")?;
+        }
+
+        return Ok(());
+    }
+
+    let board = usb.board(args.port);
 
     if args.status {
         // The library keeps the check off the read path for callers that read
@@ -123,6 +143,22 @@ mod tests {
     fn reset_flag() {
         let args = parse(&["--reset"]).unwrap();
         assert!(args.reset);
+    }
+
+    #[test]
+    fn list_flag() {
+        let args = parse(&["--list"]).unwrap();
+        assert!(args.list);
+    }
+
+    #[test]
+    fn list_conflicts_with_every_other_mode() {
+        // Including `--port`: listing is how you find out which port to give.
+        assert!(parse(&["--list", "--status"]).is_err());
+        assert!(parse(&["--list", "--reset"]).is_err());
+        assert!(parse(&["--list", "--port", "3"]).is_err());
+        assert!(parse(&["--list", "1", "2"]).is_err());
+        assert!(parse(&["--list", "-d"]).is_err());
     }
 
     #[test]
