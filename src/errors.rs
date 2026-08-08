@@ -10,10 +10,6 @@ pub enum Error {
     #[error("{0}")]
     Usb(#[from] rusb::Error),
 
-    /// I/O error (e.g. from writing to stdout in the CLI).
-    #[error("{0}")]
-    IO(#[from] std::io::Error),
-
     /// No relay board was found on the USB bus.
     #[error("no relay board found")]
     NotFound,
