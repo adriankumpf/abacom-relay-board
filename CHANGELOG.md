@@ -64,6 +64,18 @@
   rendered as nothing at all — `Active relays: ` — which reads as a bug rather
   than as "no relays"
 
+### Changed
+
+- Read the shift register in a single CH341A UIO stream instead of one USB
+  transfer per line change. A read costs 2 transfers rather than 33 — one packet
+  of pin states out, one packet of samples back — which takes `Board::relays()`
+  from 118 transfers to 56 and `set_relays` with `Verify::Enabled` from 87 to
+  56: roughly 4.9 ms to 2.4 ms and 3.6 ms to 2.4 ms at the measured ~41 µs per
+  transfer. Opening a board costs one extra transfer, which claims the D0–D5
+  lines as outputs for the stream to use. The write path is deliberately left
+  alone: the CH341A emits stream states faster than the DATA line settles, so a
+  batched write clocks in the previous bit
+
 ### Added
 
 - `Error::InvalidRelay` for relay numbers outside 1–8
