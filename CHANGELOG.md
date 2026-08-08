@@ -45,6 +45,9 @@
   tell what it resolved to
 - Rename the `Iter` re-export to `RelayIter`. `arb::Iter` was too vague a name
   for the crate root
+- Give `Error::VerificationFailed` `expected` and `actual` fields, both `Relays`.
+  It previously carried nothing, so a caller was told the read-back disagreed but
+  not how
 
 ### Added
 

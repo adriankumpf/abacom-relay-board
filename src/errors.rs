@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use crate::relays::Relays;
+
 /// A result type for the `arb` library.
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -23,8 +25,19 @@ pub enum Error {
     MultipleFound,
 
     /// The relay state read back after `set_relays` did not match the requested state.
-    #[error("verification failed")]
-    VerificationFailed,
+    ///
+    /// The relays were latched before the read-back, so the physical relay state is
+    /// unknown: `expected`, `actual` or neither. Read the board back to find out.
+    ///
+    /// Rendered with the sets' `Debug` rather than their `Display`, so that "no
+    /// relays" reads as `{}` instead of as nothing at all.
+    #[error("verification failed: expected {expected:?}, read back {actual:?}")]
+    VerificationFailed {
+        /// The relays that were requested.
+        expected: Relays,
+        /// The relays the shift register reported afterwards.
+        actual: Relays,
+    },
 
     /// A relay number outside the 1–8 range the board provides.
     #[error("invalid relay: expected a number between 1 and 8, got {0}")]
