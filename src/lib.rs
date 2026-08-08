@@ -13,18 +13,22 @@
 //! # Examples
 //!
 //! ```no_run
-//! use arb::{Relay, Relays, Verify};
+//! use arb::{Relay, Relays, Usb, Verify};
+//!
+//! // Initialise libusb once and keep it: this is the expensive part
+//! let usb = Usb::new().unwrap();
+//! let board = usb.board(None);
 //!
 //! // Activate relays 1 and 3
-//! arb::set_relays(Relay::One | Relay::Three, Verify::Enabled, None).unwrap();
+//! board.set_relays(Relay::One | Relay::Three, Verify::Enabled).unwrap();
 //!
 //! // Read back the current state
-//! for relay in arb::active_relays(None).unwrap() {
+//! for relay in board.relays().unwrap() {
 //!     println!("relay {relay} is active");
 //! }
 //!
 //! // Turn everything off
-//! arb::set_relays(Relays::NONE, Verify::Enabled, None).unwrap();
+//! board.set_relays(Relays::NONE, Verify::Enabled).unwrap();
 //! ```
 
 use rusb::UsbContext;
@@ -38,7 +42,7 @@ use self::ch341a::{Ch341a, Gpio};
 pub use self::errors::{Error, Result};
 pub use self::relays::{Iter, Relay, Relays};
 
-/// Whether [`set_relays`] reads the shift register back to confirm the write.
+/// Whether [`Board::set_relays`] reads the shift register back to confirm the write.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Verify {
     /// Read the shift register back and fail on a mismatch.
@@ -54,25 +58,12 @@ const CLK: u8 = 0x08; // D3 → A6275 CLK
 const DATA: u8 = 0x20; // D5 → A6275 Serial in
 const READ: u8 = 0x80; // D7 ← A6275 Serial out
 
-struct RelayBoard<T> {
+/// The Allegro A6275 shift register protocol, driven over a set of GPIO lines.
+struct A6275<T> {
     gpio: T,
 }
 
-impl RelayBoard<Ch341a> {
-    /// Finds and opens a relay board, optionally restricted to a given USB port.
-    fn open(port: Option<u8>) -> Result<Self> {
-        let device = find_device(port)?;
-
-        Ok(Self::new(Ch341a::open(&device)?))
-    }
-
-    /// Performs a USB reset on the underlying device.
-    fn reset(&self) -> Result {
-        self.gpio.reset()
-    }
-}
-
-impl<T: Gpio> RelayBoard<T> {
+impl<T: Gpio> A6275<T> {
     fn new(gpio: T) -> Self {
         Self { gpio }
     }
@@ -97,7 +88,7 @@ impl<T: Gpio> RelayBoard<T> {
     /// Clocks the 8 bits of the A6275 shift register out of its serial output (D7).
     ///
     /// Destructive: reading shifts zeros in, so the caller must restore the register
-    /// with [`RelayBoard::shift_out_bits`] if its contents still matter.
+    /// with [`A6275::shift_out_bits`] if its contents still matter.
     fn read_shift_register(&self) -> Result<u8> {
         let mut status = 0;
 
@@ -156,8 +147,7 @@ impl<T: Gpio> RelayBoard<T> {
     }
 }
 
-fn find_device(port: Option<u8>) -> Result<ch341a::Device> {
-    let context = rusb::Context::new()?;
+fn find_device(context: &rusb::Context, port: Option<u8>) -> Result<ch341a::Device> {
     let mut found = None;
 
     for device in context.devices()?.iter() {
@@ -173,71 +163,140 @@ fn find_device(port: Option<u8>) -> Result<ch341a::Device> {
     found.ok_or(Error::NotFound)
 }
 
-/// Returns the relays that are currently active.
+/// A libusb context: how relay boards are found.
 ///
-/// Internally verifies the device is responsive by writing an inverted test pattern to the
-/// shift register (without latching, so relay outputs are not disturbed) and reading it back.
-/// Returns [`Error::BadDevice`] if the read-back doesn't match.
+/// Initialising it is by far the most expensive part of talking to a board, so
+/// create one and keep it. It is cheap to clone (reference-counted) and safe to
+/// share across threads. It claims nothing and opens nothing, so contexts never
+/// conflict with each other or with another application using the same board.
 ///
-/// # Arguments
-///
-/// * `port` - USB port number to select a specific board when multiple are connected.
-///
-/// # Errors
-///
-/// * [`Error::NotFound`] — no relay board detected
-/// * [`Error::MultipleFound`] — multiple boards detected and `port` is `None`
-/// * [`Error::BadDevice`] — device did not respond correctly to the read-back test
+/// Not self-healing: if the USB controller resets or the host suspends, a `Usb`
+/// can go permanently sour. Callers that must survive that should drop it and
+/// build a new one after repeated failures.
 ///
 /// # Example
 ///
 /// ```no_run
-/// let relays = arb::active_relays(None).unwrap();
+/// let usb = arb::Usb::new().unwrap();
 ///
-/// if relays.contains(arb::Relay::Three) {
-///     println!("relay 3 is active");
-/// }
+/// let relays = usb.board(None).relays().unwrap();
 /// ```
-pub fn active_relays(port: Option<u8>) -> Result<Relays> {
-    RelayBoard::open(port)?.get_status().map(Relays::from_bits)
+#[derive(Clone, Debug)]
+pub struct Usb(rusb::Context);
+
+impl Usb {
+    /// Initialises libusb.
+    ///
+    /// # Errors
+    ///
+    /// * [`Error::Usb`] — libusb could not be initialised
+    pub fn new() -> Result<Self> {
+        Ok(Self(rusb::Context::new()?))
+    }
+
+    /// Returns the board on `port`, or the only attached board if `None`.
+    ///
+    /// Resolves nothing: the board is looked up when a method is called on it, so
+    /// this cannot fail and a [`Board`] may outlive — or predate — the device it
+    /// names.
+    ///
+    /// # Arguments
+    ///
+    /// * `port` — USB port number to select a specific board when multiple are connected.
+    pub fn board(&self, port: Option<u8>) -> Board {
+        Board {
+            usb: self.clone(),
+            port,
+        }
+    }
 }
 
-/// Activates `relays`, deactivating every relay not in the set.
+/// One relay board, found and claimed afresh for the duration of every call.
 ///
-/// # Arguments
-///
-/// * `relays` — the relays to activate. [`Relays::NONE`] turns everything off.
-/// * `verify` — whether to read the shift register back after latching and return
-///   [`Error::VerificationFailed`] on mismatch.
-/// * `port` — USB port number to select a specific board when multiple are connected.
-///
-/// # Errors
-///
-/// * [`Error::NotFound`] — no relay board detected
-/// * [`Error::MultipleFound`] — multiple boards detected and `port` is `None`
-/// * [`Error::VerificationFailed`] — the read-back did not match `relays`
-///
-/// # Example
-///
-/// ```no_run
-/// use arb::{Relay, Verify};
-///
-/// // Activate relays 1, 2, 4, 5 and 6
-/// let relays = Relay::One | Relay::Two | Relay::Four | Relay::Five | Relay::Six;
-///
-/// arb::set_relays(relays, Verify::Enabled, None).unwrap();
-/// ```
-pub fn set_relays(relays: Relays, verify: Verify, port: Option<u8>) -> Result {
-    RelayBoard::open(port)?.set_status(relays.bits(), verify)
+/// Holds no device and no claim between calls, so several `Board`s — in this
+/// process or in another application — can drive the same hardware.
+#[derive(Clone, Debug)]
+pub struct Board {
+    usb: Usb,
+    port: Option<u8>,
 }
 
-/// Performs a USB reset on the relay board.
-///
-/// # Arguments
-///
-/// * `port` — USB port number to select a specific board when multiple are connected.
-pub fn reset(port: Option<u8>) -> Result {
-    RelayBoard::open(port)?.reset()
+impl Board {
+    /// Returns the relays that are currently active.
+    ///
+    /// Internally verifies the device is responsive by writing an inverted test pattern to the
+    /// shift register (without latching, so relay outputs are not disturbed) and reading it back.
+    /// Returns [`Error::BadDevice`] if the read-back doesn't match.
+    ///
+    /// # Errors
+    ///
+    /// * [`Error::NotFound`] — no relay board detected
+    /// * [`Error::MultipleFound`] — multiple boards detected and no port was given
+    /// * [`Error::BadDevice`] — device did not respond correctly to the read-back test
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// let usb = arb::Usb::new().unwrap();
+    ///
+    /// let relays = usb.board(None).relays().unwrap();
+    ///
+    /// if relays.contains(arb::Relay::Three) {
+    ///     println!("relay 3 is active");
+    /// }
+    /// ```
+    pub fn relays(&self) -> Result<Relays> {
+        A6275::new(self.claim()?)
+            .get_status()
+            .map(Relays::from_bits)
+    }
+
+    /// Activates `relays`, deactivating every relay not in the set.
+    ///
+    /// # Arguments
+    ///
+    /// * `relays` — the relays to activate. [`Relays::NONE`] turns everything off.
+    /// * `verify` — whether to read the shift register back after latching and return
+    ///   [`Error::VerificationFailed`] on mismatch.
+    ///
+    /// # Errors
+    ///
+    /// * [`Error::NotFound`] — no relay board detected
+    /// * [`Error::MultipleFound`] — multiple boards detected and no port was given
+    /// * [`Error::VerificationFailed`] — the read-back did not match `relays`
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use arb::{Relay, Usb, Verify};
+    ///
+    /// let usb = Usb::new().unwrap();
+    ///
+    /// // Activate relays 1, 2, 4, 5 and 6
+    /// let relays = Relay::One | Relay::Two | Relay::Four | Relay::Five | Relay::Six;
+    ///
+    /// usb.board(None).set_relays(relays, Verify::Enabled).unwrap();
+    /// ```
+    pub fn set_relays(&self, relays: Relays, verify: Verify) -> Result<()> {
+        A6275::new(self.claim()?).set_status(relays.bits(), verify)
+    }
+
+    /// Performs a USB reset on the relay board.
+    ///
+    /// This resets the USB device, not the relays: the outputs are not changed.
+    ///
+    /// # Errors
+    ///
+    /// * [`Error::NotFound`] — no relay board detected
+    /// * [`Error::MultipleFound`] — multiple boards detected and no port was given
+    pub fn reset_device(&self) -> Result<()> {
+        self.claim()?.reset()
+    }
+
+    /// Finds the board and claims its CH341A interface for the duration of one call.
+    fn claim(&self) -> Result<Ch341a> {
+        Ch341a::open(&find_device(&self.usb.0, self.port)?)
+    }
 }
 
 #[cfg(test)]
@@ -298,8 +357,20 @@ mod tests {
         }
     }
 
-    fn fake() -> RelayBoard<FakeA6275> {
-        RelayBoard::new(FakeA6275::default())
+    fn fake() -> A6275<FakeA6275> {
+        A6275::new(FakeA6275::default())
+    }
+
+    #[test]
+    fn handles_can_be_shared_across_threads() {
+        // Consumers hold one `Usb` for the whole process and a `Board` per worker,
+        // calling them from any thread. Interior mutability in either type — a
+        // `Cell` timeout, say — would take `Sync` away and force locking on the
+        // caller, serialising every board behind one lock.
+        fn assert_send_sync<T: Send + Sync>() {}
+
+        assert_send_sync::<Usb>();
+        assert_send_sync::<Board>();
     }
 
     #[test]
@@ -358,7 +429,7 @@ mod tests {
 
     #[test]
     fn set_status_reports_a_read_back_mismatch() {
-        let err = RelayBoard::new(StuckLow)
+        let err = A6275::new(StuckLow)
             .set_status(0b0000_0001, Verify::Enabled)
             .unwrap_err();
 
@@ -368,7 +439,7 @@ mod tests {
     #[test]
     fn set_status_skips_the_read_back_when_not_verifying() {
         assert!(
-            RelayBoard::new(StuckLow)
+            A6275::new(StuckLow)
                 .set_status(0b0000_0001, Verify::Disabled)
                 .is_ok()
         );
@@ -397,7 +468,7 @@ mod tests {
 
     #[test]
     fn get_status_reports_an_unresponsive_device() {
-        let err = RelayBoard::new(StuckLow).get_status().unwrap_err();
+        let err = A6275::new(StuckLow).get_status().unwrap_err();
 
         assert!(matches!(err, Error::BadDevice));
     }
