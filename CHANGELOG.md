@@ -33,6 +33,10 @@
   (1–8) and `Relays` a set of them, so the relay-number-to-bit mapping is stated
   once in the library rather than re-derived by each consumer
 - Replace `set_relays`' `verify: bool` parameter with a `Verify` enum
+- Remove `Error::IO`, along with the `From<std::io::Error>` conversion it
+  provided. No library path could produce it: it existed only so the CLI could
+  use `arb::Result` for its own stdout writes, which every consumer then had to
+  handle as an unreachable variant. The CLI now uses `Box<dyn Error>`
 
 ### Added
 

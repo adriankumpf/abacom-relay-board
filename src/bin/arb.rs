@@ -1,5 +1,6 @@
 use clap::{CommandFactory, Parser, value_parser};
 
+use std::error::Error;
 use std::io::{self, Write};
 
 use arb::{Relay, Relays, Verify};
@@ -49,7 +50,10 @@ fn requested_relays(numbers: &[u8]) -> arb::Result<Relays> {
         .collect()
 }
 
-fn run() -> arb::Result {
+/// The CLI's errors: `arb::Error` from the library, `io::Error` from writing to
+/// stdout. Both are only ever displayed, so a boxed trait object is enough and
+/// the library needs no I/O variant of its own.
+fn run() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
     if !args.status && !args.reset && args.relays.is_empty() {
@@ -70,7 +74,9 @@ fn run() -> arb::Result {
     }
 
     if args.reset {
-        return board.reset_device();
+        board.reset_device()?;
+
+        return Ok(());
     }
 
     let verify = if args.disable_verification {
@@ -79,7 +85,9 @@ fn run() -> arb::Result {
         Verify::Enabled
     };
 
-    board.set_relays(requested_relays(&args.relays)?, verify)
+    board.set_relays(requested_relays(&args.relays)?, verify)?;
+
+    Ok(())
 }
 
 #[cfg(test)]
