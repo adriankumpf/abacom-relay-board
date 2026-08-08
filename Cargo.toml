@@ -3,6 +3,12 @@ name = "arb"
 version = "0.8.0"
 authors = ["Adrian Kumpf"]
 edition = '2024'
+rust-version = "1.85"
+description = "A library and CLI for controlling the ABACOM CH341A USB relay board"
+repository = "https://github.com/adriankumpf/abacom-relay-board"
+readme = "README.md"
+keywords = ["relay", "usb", "ch341a", "abacom", "gpio"]
+categories = ["hardware-support", "embedded", "command-line-utilities"]
 
 [dependencies]
 clap = { version = "4.6.6", features = ["derive"], optional = true }

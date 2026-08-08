@@ -29,7 +29,7 @@ cargo fmt
 cargo test --features=build-binary
 ```
 
-Tests run against a simulated A6275 (`FakeA6275` in `src/lib.rs`), so no hardware
+Tests run against a simulated A6275 (`FakeA6275` in `src/a6275.rs`), so no hardware
 is needed. CI runs fmt, the tests, both clippy feature sets, and `cargo doc` with
 `RUSTDOCFLAGS=-D warnings`.
 
@@ -58,3 +58,35 @@ Error types live in `src/errors.rs` using `thiserror`.
 - A USB port number is the board's port on its *parent hub*, so it is not unique across hubs. `usb.board(Some(p))` matches on it anyway (`MultipleFound` is the honest answer to a collision); `usb.boards()` selects by `Path` instead, so enumerated boards never collide
 - `0` is a CLI-only spelling of "all off" — the library has no such relay. Keep that sentinel in `src/bin/arb.rs`
 - Requires system `libusb` at compile time
+- Measured on two boards (2026-08-08), within 4% of each other: **41–43 µs per USB transfer**, and a `Usb::new()` + open + claim + release dance of 6.545 ms of which `libusb_init` is 99.2%. Transfer counts in the docs are derived from these
+
+## Settled — do not re-open
+
+Investigated and rejected. The reasons are not visible from the code, which is why they are written down.
+
+- **Batching the write path into a UIO stream.** D5 slew: the CH341A emits stream states faster than DATA settles, so the rising clock edge samples the previous bit. Reproduced byte-for-byte on two boards; splitting and padding both improve it and neither converges. Only the read path is batched
+- **Three writes per bit down to two.** The third write only brings CLK low, which the next iteration's first write already does. The *logic* half is settled — the change passes the full suite — so what is left is purely electrical: it moves the falling clock edge onto the data transition, on the same D5 that breaks the batched write. Worth 0.33 ms, and wants a bench check nobody has spent
+- **A separate `UIO_STM_DIR` transfer at open.** Measured at 38.99 µs against 41.44 µs for an ordinary transfer, it nearly doubles the ~50 µs of per-call overhead — and is paid by every call, including `reset_device()`, which issues no GPIO at all. Both GPIO paths carry the line directions themselves (see `OUTPUT_LINES` in `src/ch341a.rs`), so `Ch341a::open` sends nothing
+- **A board handle that holds the USB claim.** `claim_interface` is exclusive and boards are shared between applications, so a handle keeping it ends sharing rather than degrading it. `Board` is deliberately not this: it stores a selector and claims per call
+- **Caching the resolved device inside `Board`.** 4 µs, against a handle that goes stale on hot-plug
+- **Naming an enumerated board by `Device::address()`.** It is reassigned on re-enumeration, so a listed `Board` would go stale after `reset_device()` — which the downstream consumer calls on every retry. A port path survives that
+- **Sorting a `Vec` in `find_devices` instead of keying a `BTreeMap`.** The reason is on `find_devices` itself; what is not written there is that `find_devices` needs hardware to test, so a dropped sort would not fail anything
+- **Partial updates (`board.turn_on(relay)`).** The hardware latches all 8 bits at once, so this would hide a read-modify-write behind a setter that looks atomic — actively dangerous on a shared board
+- **`CH341A_CMD_SPI_STREAM` (0xA8).** Byte-oriented SPI with hardware bit ordering — the wrong shape for bit-banging a shift register's latch
+- **A library-internal or `rusb::GlobalContext` singleton.** `GlobalContext` panics if `libusb_init` fails (fatal inside a NIF) and can never be rebuilt, so the drop-and-recreate recovery path would not exist. Any singleton also makes a policy decision on every consumer's behalf that the one-call-per-process CLI cannot use
+- **Configurable USB timeouts.** Considered for 0.8.0 and dropped; `TIMEOUT_READ`/`TIMEOUT_WRITE` stay constants at 1000 ms
+
+## Known Limitation
+
+The library is atomic *within* a call but not *between* calls: `relays()` followed by `set_relays()` is two claims, so on a shared board a write can land in the gap and one side's change is silently lost. Documented for consumers under `# Atomicity` on `Board` (`src/lib.rs`) — keep the two in step. Closing it rather than documenting it would need a scoped claim (`board.with_claim(|claimed| …)`) holding one `Ch341a` across a closure, which `Board` has room for without a redesign.
+
+## Testing
+
+- **Mutation-check new protocol logic** — a passing suite that catches nothing is worse than none. Break it deliberately and confirm the failure before claiming coverage: an LSB-first `shift_out_bits`, an LSB-first register read, a dropped register restore and a sample taken after the rising edge are all caught today
+- **One known mutation survivor:** `relays()` quietly self-testing again. `Board`'s methods go through `claim()` and need hardware, so the tests drive `A6275` one layer down; the transfer-count assertions (`status()` 28, `self_test()` 56) are what pin the cost there
+- **Doctests are the anti-drift mechanism** for the relay mapping — a `no_run` example once shipped a wrong bit literal precisely because nothing executed it
+- **Hardware safety.** Anything driving a real board must never assert LATCH (`src/a6275.rs`), or writes reach the relay outputs. Reading *is* destructive — zeros shift in — so capture the register at startup and restore it on every exit path including panic unwind, otherwise the next read lies without any relay having moved
+
+## Consumers
+
+[arb-ex](https://github.com/adriankumpf/arb-ex) is the only Rust-level consumer and pins a git tag, so every tag bump costs a coordinated Elixir release — batch breaking changes into one release rather than paying repeatedly. It must hold one `Usb` for the whole BEAM node (that is where the ~6.5 ms/call saving is) in something swappable, since a reused context no longer self-heals: after repeated failures the holder drops it and builds a new one.
