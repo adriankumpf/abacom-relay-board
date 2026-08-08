@@ -11,7 +11,7 @@ struct Args {
     #[arg(short, long, conflicts_with_all = ["relays", "reset", "disable_verification"])]
     status: bool,
 
-    /// Resets the relay board
+    /// Performs a USB reset on the relay board
     #[arg(short, long, conflicts_with_all = ["relays", "disable_verification"])]
     reset: bool,
 
@@ -57,8 +57,12 @@ fn run() -> arb::Result {
         std::process::exit(2);
     }
 
+    // After the help branch: initialising libusb here would make a bare `arb`
+    // fail with a USB error instead of printing its help.
+    let board = arb::Usb::new()?.board(args.port);
+
     if args.status {
-        let relays = arb::active_relays(args.port)?;
+        let relays = board.relays()?;
 
         writeln!(io::stdout(), "Active relays: {relays}")?;
 
@@ -66,7 +70,7 @@ fn run() -> arb::Result {
     }
 
     if args.reset {
-        return arb::reset(args.port);
+        return board.reset_device();
     }
 
     let verify = if args.disable_verification {
@@ -75,7 +79,7 @@ fn run() -> arb::Result {
         Verify::Enabled
     };
 
-    arb::set_relays(requested_relays(&args.relays)?, verify, args.port)
+    board.set_relays(requested_relays(&args.relays)?, verify)
 }
 
 #[cfg(test)]

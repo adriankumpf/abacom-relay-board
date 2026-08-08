@@ -4,11 +4,34 @@
 
 ### Changed (**breaking**)
 
+- Replace the `active_relays`, `set_relays` and `reset` free functions with two
+  types: `Usb`, a libusb context, and `Board`, one relay board found through it.
+  Each free function created its own context, and `libusb_init` was 99% of the
+  cost of a call — 6.5 ms of a 6.6 ms open. A caller that keeps one `Usb` now
+  pays that once instead of per call, leaving ~50 µs of per-call overhead:
+
+  ```rust
+  let usb = arb::Usb::new()?;
+  let board = usb.board(port);
+
+  board.set_relays(relays, Verify::Enabled)?;
+  let active = board.relays()?;
+  board.reset_device()?;
+  ```
+
+  `Usb` is cheap to clone and `Send + Sync`, so one context can serve every
+  thread. `Board` is free to build, resolves nothing until a method is called,
+  and — as before — claims the USB interface only for the duration of one call,
+  so it never locks another application out of a shared board. Note that a
+  reused context no longer self-heals: after repeated failures, drop the `Usb`
+  and build a new one
+- Rename `get_status` to `Board::relays`, now returning `Relays`
+- Rename `set_status` to `Board::set_relays`, now taking `Relays`
+- Rename `reset` to `Board::reset_device`. `reset(port)` read like "turn all the
+  relays off"; it is a USB reset and leaves the relay outputs untouched
 - Model relays as types instead of a raw bitmask. `Relay` names a single relay
   (1–8) and `Relays` a set of them, so the relay-number-to-bit mapping is stated
   once in the library rather than re-derived by each consumer
-- Rename `get_status` to `active_relays`, now returning `Relays`
-- Rename `set_status` to `set_relays`, now taking `Relays`
 - Replace `set_relays`' `verify: bool` parameter with a `Verify` enum
 
 ### Added
