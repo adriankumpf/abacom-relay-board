@@ -85,6 +85,9 @@ impl Ch341a {
     /// it was found. Platforms whose libusb lacks that capability report
     /// `NotSupported` and are ignored: rusb then behaves as if the call had
     /// never been made, and there is no kernel driver to detach there anyway.
+    ///
+    /// The claim is exclusive, so opening a board another application is currently
+    /// talking to fails with [`Error::Busy`].
     pub fn open(device: &Device) -> Result<Self> {
         let handle = device.open()?;
 
@@ -93,7 +96,12 @@ impl Ch341a {
             Err(e) => return Err(e.into()),
         }
 
-        handle.claim_interface(INTERFACE)?;
+        // `Busy` here means the interface is already claimed, which is contention
+        // rather than a USB fault, so it is reported as its own error.
+        handle.claim_interface(INTERFACE).map_err(|e| match e {
+            rusb::Error::Busy => Error::Busy,
+            e => e.into(),
+        })?;
 
         Ok(Self { handle })
     }

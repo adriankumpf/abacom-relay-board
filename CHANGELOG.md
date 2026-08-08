@@ -45,6 +45,24 @@
   tell what it resolved to
 - Rename the `Iter` re-export to `RelayIter`. `arb::Iter` was too vague a name
   for the crate root
+- Give `Error::VerificationFailed` `expected` and `actual` fields, both `Relays`.
+  It previously carried nothing, so a caller was told the read-back disagreed but
+  not how
+- Rename `Error::BadDevice` to `Error::SelfTestFailed`, and correct its
+  documentation, which still described an "empty read" — that became
+  `Error::UnexpectedTransferLength` in 0.7.1. The two read-back failures stay
+  distinct because the recovery differs: `SelfTestFailed` writes its test pattern
+  without latching, so the relays were never touched, whereas
+  `VerificationFailed` latched first and leaves their physical state unknown
+- Report a board held by another application as the new `Error::Busy` rather than
+  as `Error::Usb(rusb::Error::Busy)`, which made it indistinguishable from a real
+  USB fault even though it is a normal and retryable condition on a shared board.
+  Breaking for callers: a `match` arm on `Error::Usb(rusb::Error::Busy)` stops
+  firing and falls through to the wildcard `#[non_exhaustive]` already requires
+- Render `Relays::NONE` as `none` rather than as the empty string. `Display` is
+  what error messages and `arb --status` interpolate, and an empty set previously
+  rendered as nothing at all — `Active relays: ` — which reads as a bug rather
+  than as "no relays"
 
 ### Added
 

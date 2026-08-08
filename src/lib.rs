@@ -121,7 +121,10 @@ impl<T: Gpio> A6275<T> {
             self.shift_out_bits(read)?;
 
             if read != status {
-                return Err(Error::VerificationFailed);
+                return Err(Error::VerificationFailed {
+                    expected: Relays::from_bits(status),
+                    actual: Relays::from_bits(read),
+                });
             }
         }
 
@@ -138,7 +141,7 @@ impl<T: Gpio> A6275<T> {
         self.shift_out_bits(test_status)?;
 
         if self.read_shift_register()? != test_status {
-            return Err(Error::BadDevice);
+            return Err(Error::SelfTestFailed);
         }
 
         self.shift_out_bits(status)?;
@@ -214,7 +217,9 @@ impl Usb {
 /// One relay board, found and claimed afresh for the duration of every call.
 ///
 /// Holds no device and no claim between calls, so several `Board`s — in this
-/// process or in another application — can drive the same hardware.
+/// process or in another application — can drive the same hardware. Two calls
+/// that do overlap are not serialised: the loser gets [`Error::Busy`] and should
+/// retry.
 #[derive(Clone, Debug)]
 pub struct Board {
     usb: Usb,
@@ -226,13 +231,14 @@ impl Board {
     ///
     /// Internally verifies the device is responsive by writing an inverted test pattern to the
     /// shift register (without latching, so relay outputs are not disturbed) and reading it back.
-    /// Returns [`Error::BadDevice`] if the read-back doesn't match.
+    /// Returns [`Error::SelfTestFailed`] if the read-back doesn't match.
     ///
     /// # Errors
     ///
     /// * [`Error::NotFound`] — no relay board detected
     /// * [`Error::MultipleFound`] — multiple boards detected and no port was given
-    /// * [`Error::BadDevice`] — device did not respond correctly to the read-back test
+    /// * [`Error::Busy`] — another application is talking to the board
+    /// * [`Error::SelfTestFailed`] — device did not respond correctly to the read-back test
     ///
     /// # Example
     ///
@@ -263,6 +269,7 @@ impl Board {
     ///
     /// * [`Error::NotFound`] — no relay board detected
     /// * [`Error::MultipleFound`] — multiple boards detected and no port was given
+    /// * [`Error::Busy`] — another application is talking to the board
     /// * [`Error::VerificationFailed`] — the read-back did not match `relays`
     ///
     /// # Example
@@ -289,6 +296,7 @@ impl Board {
     ///
     /// * [`Error::NotFound`] — no relay board detected
     /// * [`Error::MultipleFound`] — multiple boards detected and no port was given
+    /// * [`Error::Busy`] — another application is talking to the board
     pub fn reset_device(&self) -> Result<()> {
         self.claim()?.reset()
     }
@@ -429,11 +437,23 @@ mod tests {
 
     #[test]
     fn set_status_reports_a_read_back_mismatch() {
+        // An asymmetric pattern, so that reporting the two sets the wrong way round
+        // is caught rather than looking identical.
         let err = A6275::new(StuckLow)
-            .set_status(0b0000_0001, Verify::Enabled)
+            .set_status(0b1010_0110, Verify::Enabled)
             .unwrap_err();
 
-        assert!(matches!(err, Error::VerificationFailed));
+        assert_eq!(
+            err.to_string(),
+            "verification failed: expected 2 3 6 8, read back none"
+        );
+
+        let Error::VerificationFailed { expected, actual } = err else {
+            panic!("expected a verification failure, got {err:?}");
+        };
+
+        assert_eq!(expected, Relays::from_bits(0b1010_0110));
+        assert_eq!(actual, Relays::NONE);
     }
 
     #[test]
@@ -470,6 +490,6 @@ mod tests {
     fn get_status_reports_an_unresponsive_device() {
         let err = A6275::new(StuckLow).get_status().unwrap_err();
 
-        assert!(matches!(err, Error::BadDevice));
+        assert!(matches!(err, Error::SelfTestFailed));
     }
 }
