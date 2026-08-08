@@ -48,6 +48,12 @@
 - Give `Error::VerificationFailed` `expected` and `actual` fields, both `Relays`.
   It previously carried nothing, so a caller was told the read-back disagreed but
   not how
+- Rename `Error::BadDevice` to `Error::SelfTestFailed`, and correct its
+  documentation, which still described an "empty read" — that became
+  `Error::UnexpectedTransferLength` in 0.7.1. The two read-back failures stay
+  distinct because the recovery differs: `SelfTestFailed` writes its test pattern
+  without latching, so the relays were never touched, whereas
+  `VerificationFailed` latched first and leaves their physical state unknown
 
 ### Added
 

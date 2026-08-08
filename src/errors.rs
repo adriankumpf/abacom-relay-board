@@ -47,7 +47,13 @@ pub enum Error {
     #[error("unexpected usb transfer length: expected {expected} bytes, got {actual}")]
     UnexpectedTransferLength { expected: usize, actual: usize },
 
-    /// The device did not respond as expected (e.g. empty read or failed read-back test).
-    #[error("bad device")]
-    BadDevice,
+    /// The board's self-test failed: a test pattern did not survive the round trip
+    /// through the shift register.
+    ///
+    /// The pattern is written without latching, so the relays were never touched
+    /// and their physical state is unchanged — only the read path is suspect. This
+    /// is the difference from [`Error::VerificationFailed`], where the relays were
+    /// latched before the disagreement was noticed.
+    #[error("self-test failed")]
+    SelfTestFailed,
 }

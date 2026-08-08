@@ -141,7 +141,7 @@ impl<T: Gpio> A6275<T> {
         self.shift_out_bits(test_status)?;
 
         if self.read_shift_register()? != test_status {
-            return Err(Error::BadDevice);
+            return Err(Error::SelfTestFailed);
         }
 
         self.shift_out_bits(status)?;
@@ -229,13 +229,13 @@ impl Board {
     ///
     /// Internally verifies the device is responsive by writing an inverted test pattern to the
     /// shift register (without latching, so relay outputs are not disturbed) and reading it back.
-    /// Returns [`Error::BadDevice`] if the read-back doesn't match.
+    /// Returns [`Error::SelfTestFailed`] if the read-back doesn't match.
     ///
     /// # Errors
     ///
     /// * [`Error::NotFound`] — no relay board detected
     /// * [`Error::MultipleFound`] — multiple boards detected and no port was given
-    /// * [`Error::BadDevice`] — device did not respond correctly to the read-back test
+    /// * [`Error::SelfTestFailed`] — device did not respond correctly to the read-back test
     ///
     /// # Example
     ///
@@ -481,6 +481,6 @@ mod tests {
     fn get_status_reports_an_unresponsive_device() {
         let err = A6275::new(StuckLow).get_status().unwrap_err();
 
-        assert!(matches!(err, Error::BadDevice));
+        assert!(matches!(err, Error::SelfTestFailed));
     }
 }
