@@ -42,7 +42,7 @@ Six-layer design — `Usb` finds, `Board` is the device, `A6275` is the protocol
 3. **Board selection** (`src/find.rs`) — `Path` (where a board sits on the USB tree) and `Select` (which board a `Board` names). `find_devices()` enumerates, `find_device()` resolves one. Crate-private.
 4. **Shift register protocol** (`src/lib.rs`) — `A6275<T: Gpio>` clocks bits in and out. Private, like `Path`/`Select`: both are exercised by the tests directly, since neither needs hardware.
 5. **CH341A protocol** (`src/ch341a.rs`) — Low-level USB bulk transfers via `rusb`. No `unsafe` code. Exposes `set_output()` and `sample_clocked()` through the `Gpio` trait, which lets the shift register protocol be tested without hardware.
-6. **CLI** (`src/bin/arb.rs`) — `clap`-derived argument parser. Only compiled with `build-binary` feature.
+6. **CLI** (`src/bin/arb.rs`) — `clap`-derived argument parser. Only compiled with `build-binary` feature. Modes (`--status`, `--list`, `--reset`, relays) are mutually exclusive via one `ArgGroup`.
 
 Error types live in `src/errors.rs` using `thiserror`.
 

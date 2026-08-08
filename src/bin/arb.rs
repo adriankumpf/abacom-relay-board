@@ -1,27 +1,31 @@
-use clap::{CommandFactory, Parser, value_parser};
+use clap::{ArgGroup, CommandFactory, Parser, value_parser};
 
 use std::error::Error;
 use std::io::{self, Write};
 
 use arb::{Relay, Relays, Verify};
 
+// The modes are mutually exclusive, which a group states once rather than pairwise
+// on each of them. `disable_verification` and `port` are modifiers, not modes, so
+// they name the modes they do not apply to.
 #[derive(Parser, Debug)]
 #[command(name = "abacom-relay-board (arb)")]
+#[command(group(ArgGroup::new("mode").args(["status", "list", "reset", "relays"])))]
 struct Args {
     /// Gets relays status
-    #[arg(short, long, conflicts_with_all = ["relays", "reset", "disable_verification"])]
+    #[arg(short, long)]
     status: bool,
 
     /// Lists the attached relay boards
-    #[arg(short, long, conflicts_with_all = ["relays", "status", "reset", "disable_verification", "port"])]
+    #[arg(short, long, conflicts_with = "port")]
     list: bool,
 
     /// Performs a USB reset on the relay board
-    #[arg(short, long, conflicts_with_all = ["relays", "disable_verification"])]
+    #[arg(short, long)]
     reset: bool,
 
     /// Disables the verification after activating relays
-    #[arg(short, long)]
+    #[arg(short, long, conflicts_with_all = ["status", "list", "reset"])]
     disable_verification: bool,
 
     /// Custom USB Port
