@@ -401,7 +401,7 @@ mod tests {
     }
 
     /// Runs `call` against a counting board and returns the transfers it cost.
-    fn transfers(call: impl FnOnce(&A6275<Counting>) -> Result<()>) -> usize {
+    fn transfers<R>(call: impl FnOnce(&A6275<Counting>) -> Result<R>) -> usize {
         let board = A6275::new(Counting {
             gpio: FakeA6275::default(),
             transfers: Cell::new(0),
@@ -541,24 +541,24 @@ mod tests {
         // The point of the clocked read: 33 transfers as one write and one read per
         // bit, 2 as a single stream. At the measured ~41 µs per transfer that is
         // 1.4 ms against 0.1 ms, and it is why `get_status` below is 56 and not 118.
-        assert_eq!(transfers(|board| board.read_shift_register().map(drop)), 2);
+        assert_eq!(transfers(|board| board.read_shift_register()), 2);
     }
 
     #[test]
     fn the_protocol_costs_the_transfers_it_should() {
         // Writing is still one transfer per line change: 8 bits × 3 states, plus the
-        // low state either side. See `Settled` in the roadmap for why it stays that
-        // way — the batched write path is not reliable on this hardware.
+        // low state either side. It stays that way deliberately: the CH341A emits
+        // stream states faster than the DATA line settles, so a batched write clocks
+        // in the previous bit.
         assert_eq!(transfers(|board| board.shift_out_bits(0b1010_1010)), 26);
 
         // Plus the two states that latch the outputs.
-        let write = |verify| move |board: &A6275<Counting>| board.set_status(0, verify);
-        assert_eq!(transfers(write(Verify::Disabled)), 28);
+        assert_eq!(transfers(|board| board.set_status(0, Verify::Disabled)), 28);
 
         // Verifying adds a read and the restore that a destructive read costs.
-        assert_eq!(transfers(write(Verify::Enabled)), 56);
+        assert_eq!(transfers(|board| board.set_status(0, Verify::Enabled)), 56);
 
         // Read, then the self-test's pattern, read and restore.
-        assert_eq!(transfers(|board| board.get_status().map(drop)), 56);
+        assert_eq!(transfers(|board| board.get_status()), 56);
     }
 }

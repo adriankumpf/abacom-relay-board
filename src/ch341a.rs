@@ -45,9 +45,6 @@ const UIO_STM_DIR: u8 = 0x40;
 const UIO_STM_OUT: u8 = 0x80;
 
 /// The D0–D5 lines that can be driven, as a direction mask.
-///
-/// Both command paths have to agree on this: the `0xA1` message carries it in
-/// every write, and a UIO stream relies on it having been set once at open.
 const OUTPUT_LINES: u8 = 0x3f;
 
 /// The CH341A's packet size. A UIO stream has to fit in one.
@@ -68,31 +65,27 @@ fn expect_transfer_len(actual: usize, expected: usize) -> Result<()> {
     Err(Error::UnexpectedTransferLength { expected, actual })
 }
 
-/// Encodes the UIO stream that takes `samples` readings, one per clock period.
-///
-/// `clock` is driven low, and then for every sample the input lines are read,
-/// `clock` is driven high, and `clock` is driven low again. A device that shifts
-/// on the rising edge is therefore sampled once per bit, first bit first, with
-/// every other line held low throughout and left low at the end.
+/// Sends `msg` to the device, failing if it was not transferred whole.
+fn write_msg(handle: &DeviceHandle, msg: &[u8]) -> Result<()> {
+    let written = handle.write_bulk(ENDPOINT_OUT, msg, TIMEOUT_WRITE)?;
+
+    expect_transfer_len(written, msg.len())
+}
+
+/// Encodes the UIO stream behind [`Gpio::sample_clocked`].
 ///
 /// Returns the packet and the number of bytes used.
 fn sample_stream(clock: u8, samples: usize) -> ([u8; PACKET_LENGTH], usize) {
-    debug_assert!(samples <= MAX_SAMPLES, "a UIO stream must fit one packet");
-
     let mut packet = [0u8; PACKET_LENGTH];
+    let end = 2 + samples * 3;
 
     packet[0] = CMD_UIO_STREAM;
     packet[1] = UIO_STM_OUT; // every line low, `clock` included
 
-    for sample in 0..samples {
-        let states = &mut packet[2 + sample * 3..];
-
-        states[0] = UIO_STM_IN;
-        states[1] = UIO_STM_OUT | clock;
-        states[2] = UIO_STM_OUT;
+    for states in packet[2..end].chunks_exact_mut(3) {
+        states.copy_from_slice(&[UIO_STM_IN, UIO_STM_OUT | clock, UIO_STM_OUT]);
     }
 
-    let end = 2 + samples * 3;
     packet[end] = UIO_STM_END;
 
     (packet, end + 1)
@@ -146,9 +139,6 @@ impl Ch341a {
     ///
     /// The claim is exclusive, so opening a board another application is currently
     /// talking to fails with [`Error::Busy`].
-    ///
-    /// Claims the D0–D5 lines as outputs on the way, which a UIO stream needs and
-    /// does not state for itself.
     pub fn open(device: &Device) -> Result<Self> {
         let handle = device.open()?;
 
@@ -165,11 +155,12 @@ impl Ch341a {
         })?;
 
         // The `0xA1` write path carries the line directions in every message, but a
-        // UIO stream carries none, so they are set once here — as flashrom does for
-        // the same chip. The two must keep saying the same thing.
-        let msg = [CMD_UIO_STREAM, UIO_STM_DIR | OUTPUT_LINES, UIO_STM_END];
-        let written = handle.write_bulk(ENDPOINT_OUT, &msg, TIMEOUT_WRITE)?;
-        expect_transfer_len(written, msg.len())?;
+        // UIO stream carries none, so they are claimed once here — as flashrom does
+        // for the same chip. The two must keep saying the same thing.
+        write_msg(
+            &handle,
+            &[CMD_UIO_STREAM, UIO_STM_DIR | OUTPUT_LINES, UIO_STM_END],
+        )?;
 
         Ok(Self { handle })
     }
@@ -186,19 +177,15 @@ impl Gpio for Ch341a {
         let msg = [
             0xA1, 0x6a, 0x1f, 0x00, 0x10, data, OUTPUT_LINES, 0x00, 0x00, 0x00, 0x00,
         ];
-        let written = self.handle.write_bulk(ENDPOINT_OUT, &msg, TIMEOUT_WRITE)?;
 
-        expect_transfer_len(written, msg.len())
+        write_msg(&self.handle, &msg)
     }
 
     fn sample_clocked<const N: usize>(&self, clock: u8) -> Result<[u8; N]> {
         const { assert!(N <= MAX_SAMPLES, "a UIO stream must fit one packet") };
 
         let (packet, len) = sample_stream(clock, N);
-        let written = self
-            .handle
-            .write_bulk(ENDPOINT_OUT, &packet[..len], TIMEOUT_WRITE)?;
-        expect_transfer_len(written, len)?;
+        write_msg(&self.handle, &packet[..len])?;
 
         // One byte per `UIO_STM_IN`, in the order the stream ran them.
         let mut samples = [0u8; N];
@@ -215,12 +202,12 @@ impl Gpio for Ch341a {
 mod tests {
     use super::*;
 
-    /// The A6275 clock, as `lib.rs` maps it: D3.
-    const CLK: u8 = 0x08;
+    /// A clock line. Which one is the protocol layer's business, not this module's.
+    const CLOCK: u8 = 0x08;
 
     #[test]
     fn a_sample_stream_reads_before_every_rising_clock_edge() {
-        let (packet, len) = sample_stream(CLK, 2);
+        let (packet, len) = sample_stream(CLOCK, 2);
 
         assert_eq!(
             &packet[..len],
@@ -235,16 +222,8 @@ mod tests {
     }
 
     #[test]
-    fn reading_a_shift_register_fits_one_packet() {
-        let (_, len) = sample_stream(CLK, 8);
-
-        assert_eq!(len, 27);
-        assert!(len <= PACKET_LENGTH);
-    }
-
-    #[test]
     fn the_longest_stream_fits_one_packet() {
-        let (_, len) = sample_stream(CLK, MAX_SAMPLES);
+        let (_, len) = sample_stream(CLOCK, MAX_SAMPLES);
 
         assert!(len <= PACKET_LENGTH, "{len} bytes exceeds {PACKET_LENGTH}");
     }
