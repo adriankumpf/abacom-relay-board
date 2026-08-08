@@ -10,6 +10,8 @@
 //! - `0xAB` (UIO stream): runs a short program of pin states, so that reading a
 //!   whole shift register — sample, clock, sample, … — costs one transfer out and
 //!   one back rather than one transfer per state
+//!
+//! Each carries the line directions itself, so opening a board sends nothing.
 
 use std::time::Duration;
 
@@ -45,14 +47,17 @@ const UIO_STM_DIR: u8 = 0x40;
 const UIO_STM_OUT: u8 = 0x80;
 
 /// The D0–D5 lines that can be driven, as a direction mask.
+///
+/// Both command paths state it for themselves: the `0xA1` message carries it at
+/// index 6, and a UIO stream opens with it. Neither depends on the other having run.
 const OUTPUT_LINES: u8 = 0x3f;
 
 /// The CH341A's packet size. A UIO stream has to fit in one.
 const PACKET_LENGTH: usize = 0x20;
 
 /// The most samples one stream can take: three states each, after the command,
-/// the initial `OUT` and the terminator.
-const MAX_SAMPLES: usize = (PACKET_LENGTH - 3) / 3;
+/// the two states that open the stream and the terminator.
+const MAX_SAMPLES: usize = (PACKET_LENGTH - 4) / 3;
 
 pub type Device = rusb::Device<rusb::Context>;
 type DeviceHandle = rusb::DeviceHandle<rusb::Context>;
@@ -74,15 +79,22 @@ fn write_msg(handle: &DeviceHandle, msg: &[u8]) -> Result<()> {
 
 /// Encodes the UIO stream behind [`Gpio::sample_clocked`].
 ///
+/// The stream claims the lines it drives, so it depends on nothing having been set
+/// up before it — the same two states, in the same order, that flashrom's
+/// `enable_pins` uses: drive everything low, then switch the drivers on. Loading the
+/// output latch first matters, because D0 is the A6275 latch and enabling the
+/// drivers over an undefined latch would assert it.
+///
 /// Returns the packet and the number of bytes used.
 fn sample_stream(clock: u8, samples: usize) -> ([u8; PACKET_LENGTH], usize) {
     let mut packet = [0u8; PACKET_LENGTH];
-    let end = 2 + samples * 3;
+    let end = 3 + samples * 3;
 
     packet[0] = CMD_UIO_STREAM;
     packet[1] = UIO_STM_OUT; // every line low, `clock` included
+    packet[2] = UIO_STM_DIR | OUTPUT_LINES;
 
-    for states in packet[2..end].chunks_exact_mut(3) {
+    for states in packet[3..end].chunks_exact_mut(3) {
         states.copy_from_slice(&[UIO_STM_IN, UIO_STM_OUT | clock, UIO_STM_OUT]);
     }
 
@@ -154,14 +166,6 @@ impl Ch341a {
             e => e.into(),
         })?;
 
-        // The `0xA1` write path carries the line directions in every message, but a
-        // UIO stream carries none, so they are claimed once here — as flashrom does
-        // for the same chip. The two must keep saying the same thing.
-        write_msg(
-            &handle,
-            &[CMD_UIO_STREAM, UIO_STM_DIR | OUTPUT_LINES, UIO_STM_END],
-        )?;
-
         Ok(Self { handle })
     }
 
@@ -214,6 +218,7 @@ mod tests {
             &[
                 0xAB, // UIO stream
                 0x80, // every line low
+                0x7f, // D0–D5 are outputs, now that they hold a defined value
                 0x00, 0x88, 0x80, // read, clock high, clock low
                 0x00, 0x88, 0x80, // read, clock high, clock low
                 0x20, // end
