@@ -21,6 +21,8 @@
 - Raise the USB bulk read timeout from 10 ms to 1000 ms, matching the write
   timeout. Ten milliseconds for a USB round trip is tight enough to fail
   spuriously on a loaded host or through a hub, and nothing retries behind it
+- Re-attach the kernel driver when the interface is released. The driver was
+  previously detached on open and never restored
 
 ## [0.7.1] - 2026-04-02
 

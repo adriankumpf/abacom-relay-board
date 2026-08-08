@@ -78,12 +78,19 @@ pub struct Ch341a {
 }
 
 impl Ch341a {
-    /// Opens `device`, detaching the kernel driver if one is attached.
+    /// Opens `device` and claims its bulk interface.
+    ///
+    /// Any kernel driver bound to the interface is detached when the interface
+    /// is claimed and re-attached when it is released, so the board is left as
+    /// it was found. Platforms whose libusb lacks that capability report
+    /// `NotSupported` and are ignored: rusb then behaves as if the call had
+    /// never been made, and there is no kernel driver to detach there anyway.
     pub fn open(device: &Device) -> Result<Self> {
         let handle = device.open()?;
 
-        if let Ok(true) = handle.kernel_driver_active(INTERFACE) {
-            handle.detach_kernel_driver(INTERFACE)?;
+        match handle.set_auto_detach_kernel_driver(true) {
+            Ok(()) | Err(rusb::Error::NotSupported) => {}
+            Err(e) => return Err(e.into()),
         }
 
         handle.claim_interface(INTERFACE)?;
