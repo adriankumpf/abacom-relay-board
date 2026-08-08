@@ -32,13 +32,20 @@ use crate::errors::{Error, Result};
 /// ```
 /// use arb::Location;
 ///
-/// let location: Location = "1-1.3".parse()?;
+/// // What `Usb::boards` printed last time, kept in a configuration file
+/// let stored = "1-1.3";
+/// let location: Location = stored.parse()?;
 ///
-/// assert_eq!(location.bus(), 1);
-/// assert_eq!(location.port(), Some(3));
-/// assert_eq!(location.to_string(), "1-1.3");
+/// assert_eq!(location.to_string(), stored);
+///
+/// // Port 3 of a different hub is a different board, which is the whole point
+/// assert_ne!(location, "1-2.3".parse()?);
 /// # Ok::<(), arb::Error>(())
 /// ```
+///
+/// The rendering is the whole of the type's public surface: there is no reading the
+/// bus or a hop out of it, because a half-read location is not one you can name a
+/// board with. Store the string, parse it back.
 ///
 /// It survives re-enumeration, which is why a board is named by this rather than by
 /// `Device::address`: unplugging the board, or the `reset_device` a caller issues to
@@ -67,15 +74,10 @@ impl Location {
         Ok(Self::new(device.bus_number(), device.port_numbers()?))
     }
 
-    /// The USB bus the board is on.
-    pub fn bus(&self) -> u8 {
-        self.bus
-    }
-
     /// The board's port on the hub it is plugged into.
     ///
     /// Only a root hub has no port at all, and a root hub is never a relay board.
-    pub fn port(&self) -> Option<u8> {
+    fn port(&self) -> Option<u8> {
         self.hops.last().copied()
     }
 }
