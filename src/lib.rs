@@ -19,6 +19,9 @@
 //! let usb = Usb::new().unwrap();
 //! let board = usb.board(None);
 //!
+//! // Confirm the board is answering — worth doing once, not on every read
+//! board.self_test().unwrap();
+//!
 //! // Activate relays 1 and 3
 //! board.set_relays(Relay::One | Relay::Three, Verify::Enabled).unwrap();
 //!
@@ -113,8 +116,7 @@ impl<T: Gpio> A6275<T> {
         self.gpio.set_output(0)?;
 
         if verify == Verify::Enabled {
-            let read = self.read_shift_register()?;
-            self.shift_out_bits(read)?;
+            let read = self.status()?;
 
             if read != status {
                 return Err(Error::VerificationFailed {
@@ -127,22 +129,34 @@ impl<T: Gpio> A6275<T> {
         Ok(())
     }
 
-    /// Reads the current relay state, checking that the device is responsive.
-    fn get_status(&self) -> Result<u8> {
+    /// Reads the shift register and puts back what reading it consumed.
+    fn status(&self) -> Result<u8> {
         let status = self.read_shift_register()?;
-        let test_status = !status;
-
-        // Health check: write an inverted test pattern to the shift register without
-        // latching, so the relay outputs are left untouched, and read it back.
-        self.shift_out_bits(test_status)?;
-
-        if self.read_shift_register()? != test_status {
-            return Err(Error::SelfTestFailed);
-        }
 
         self.shift_out_bits(status)?;
 
         Ok(status)
+    }
+
+    /// Checks that a test pattern survives the round trip through the shift register.
+    ///
+    /// Writes the complement of the register's current contents without latching, so
+    /// the relay outputs are never touched, reads it back and puts the original
+    /// contents back — including when the check fails, so that a failure does not
+    /// leave the register disagreeing with the latched outputs.
+    fn self_test(&self) -> Result<()> {
+        let status = self.read_shift_register()?;
+        let test_status = !status;
+
+        self.shift_out_bits(test_status)?;
+        let read = self.read_shift_register()?;
+        self.shift_out_bits(status)?;
+
+        if read != test_status {
+            return Err(Error::SelfTestFailed);
+        }
+
+        Ok(())
     }
 }
 
@@ -225,16 +239,14 @@ pub struct Board {
 impl Board {
     /// Returns the relays that are currently active.
     ///
-    /// Internally verifies the device is responsive by writing an inverted test pattern to the
-    /// shift register (without latching, so relay outputs are not disturbed) and reading it back.
-    /// Returns [`Error::SelfTestFailed`] if the read-back doesn't match.
+    /// Takes the shift register at its word: [`Board::self_test`] is the separate
+    /// check that the board is still answering correctly.
     ///
     /// # Errors
     ///
     /// * [`Error::NotFound`] — no relay board detected
     /// * [`Error::MultipleFound`] — multiple boards detected and no port was given
     /// * [`Error::Busy`] — another application is talking to the board
-    /// * [`Error::SelfTestFailed`] — device did not respond correctly to the read-back test
     ///
     /// # Example
     ///
@@ -248,9 +260,27 @@ impl Board {
     /// }
     /// ```
     pub fn relays(&self) -> Result<Relays> {
-        A6275::new(self.claim()?)
-            .get_status()
-            .map(Relays::from_bits)
+        A6275::new(self.claim()?).status().map(Relays::from_bits)
+    }
+
+    /// Checks that the board answers correctly, without moving any relay.
+    ///
+    /// Writes an inverted test pattern to the shift register and reads it back. The
+    /// pattern is never latched and the register's original contents are put back
+    /// afterwards, so this is safe to call on a board driving live outputs.
+    ///
+    /// Roughly doubles the cost of a read, which is why it is not part of
+    /// [`Board::relays`]: call it when a board is suspect, or periodically, rather
+    /// than on every read.
+    ///
+    /// # Errors
+    ///
+    /// * [`Error::NotFound`] — no relay board detected
+    /// * [`Error::MultipleFound`] — multiple boards detected and no port was given
+    /// * [`Error::Busy`] — another application is talking to the board
+    /// * [`Error::SelfTestFailed`] — the test pattern did not survive the round trip
+    pub fn self_test(&self) -> Result<()> {
+        A6275::new(self.claim()?).self_test()
     }
 
     /// Activates `relays`, deactivating every relay not in the set.
@@ -375,6 +405,28 @@ mod tests {
         }
     }
 
+    /// A board that drops the most significant bit of every read — the first bit
+    /// the register presents — so a read-back disagrees with what was written while
+    /// the register underneath stays real, which is what tells a failed check from
+    /// an untouched board.
+    struct FlakyRead(FakeA6275);
+
+    impl Gpio for FlakyRead {
+        fn set_output(&self, data: u8) -> Result<()> {
+            self.0.set_output(data)
+        }
+
+        fn sample_clocked<const N: usize>(&self, clock: u8) -> Result<[u8; N]> {
+            let mut samples = self.0.sample_clocked(clock)?;
+
+            if let Some(first) = samples.first_mut() {
+                *first &= !READ;
+            }
+
+            Ok(samples)
+        }
+    }
+
     /// Counts USB transfers on their way to a simulated board: one for a line
     /// change, and one out plus one back for a clocked read.
     struct Counting {
@@ -398,6 +450,10 @@ mod tests {
 
     fn fake() -> A6275<FakeA6275> {
         A6275::new(FakeA6275::default())
+    }
+
+    fn flaky() -> A6275<FlakyRead> {
+        A6275::new(FlakyRead(FakeA6275::default()))
     }
 
     /// Runs `call` against a counting board and returns the transfers it cost.
@@ -509,39 +565,78 @@ mod tests {
     }
 
     #[test]
-    fn get_status_returns_the_latched_relays() {
+    fn status_returns_the_latched_relays() {
         let board = fake();
         board.set_status(0b0011_0111, Verify::Disabled).unwrap();
 
-        assert_eq!(board.get_status().unwrap(), 0b0011_0111);
+        assert_eq!(board.status().unwrap(), 0b0011_0111);
     }
 
     #[test]
-    fn get_status_leaves_the_board_as_it_found_it() {
+    fn status_puts_back_the_register_it_consumed() {
         let board = fake();
         board.set_status(0b1100_1001, Verify::Disabled).unwrap();
 
-        board.get_status().unwrap();
+        board.status().unwrap();
 
-        // The health check must neither latch its test pattern nor consume the
-        // register contents it read.
+        // Reading shifts zeros in, so a plain read still has to write the register
+        // back; leaving it empty would make the next read report no relays at all.
+        assert_eq!(board.gpio.register.get(), 0b1100_1001);
+        assert_eq!(board.gpio.outputs.get(), 0b1100_1001);
+    }
+
+    #[test]
+    fn the_self_test_leaves_the_board_as_it_found_it() {
+        let board = fake();
+        board.set_status(0b1100_1001, Verify::Disabled).unwrap();
+
+        board.self_test().unwrap();
+
+        // The check must neither latch its test pattern nor consume the register
+        // contents it read.
         assert_eq!(board.gpio.outputs.get(), 0b1100_1001);
         assert_eq!(board.gpio.register.get(), 0b1100_1001);
     }
 
     #[test]
-    fn get_status_reports_an_unresponsive_device() {
-        let err = A6275::new(StuckLow).get_status().unwrap_err();
+    fn the_self_test_reports_an_unresponsive_device() {
+        let err = A6275::new(StuckLow).self_test().unwrap_err();
 
         assert!(matches!(err, Error::SelfTestFailed));
+    }
+
+    #[test]
+    fn a_failed_self_test_still_puts_the_register_back() {
+        let board = flaky();
+        board.set_status(0b0011_0101, Verify::Disabled).unwrap();
+
+        board.self_test().unwrap_err();
+
+        // Bailing out before the restore would leave the register holding the zeros
+        // the read shifted in, so the next read would disagree with the latched
+        // outputs without any relay having moved.
+        assert_eq!(board.gpio.0.register.get(), 0b0011_0101);
+        assert_eq!(board.gpio.0.outputs.get(), 0b0011_0101);
+    }
+
+    #[test]
+    fn a_board_that_fails_the_self_test_still_reports_its_state() {
+        // Reading and checking are separate questions: a plain read takes the
+        // register at its word. The pattern's top bit is clear, so it survives a
+        // read that drops that bit while the inverted pattern the check writes
+        // does not.
+        let board = flaky();
+        board.set_status(0b0011_0101, Verify::Disabled).unwrap();
+
+        assert_eq!(board.status().unwrap(), 0b0011_0101);
+        assert!(board.self_test().is_err());
     }
 
     #[test]
     fn the_protocol_costs_the_transfers_it_should() {
         // The point of the clocked read: 33 transfers as one write and one read per
         // bit, 2 as a single stream. At the measured ~41 µs per transfer that is
-        // 1.4 ms against 0.1 ms, and it is why the two totals below are 56 and not
-        // 87 and 118.
+        // 1.4 ms against 0.1 ms, and it is why `status` below is 28 and not 59.
         assert_eq!(transfers(|board| board.read_shift_register()), 2);
 
         // Writing is still one transfer per line change: 8 bits × 3 states, plus the
@@ -556,7 +651,12 @@ mod tests {
         // Verifying adds a read and the restore that a destructive read costs.
         assert_eq!(transfers(|board| board.set_status(0, Verify::Enabled)), 56);
 
-        // Read, then the self-test's pattern, read and restore.
-        assert_eq!(transfers(|board| board.get_status()), 56);
+        // A plain read is that same read and restore, and nothing else.
+        assert_eq!(transfers(|board| board.status()), 28);
+
+        // The self-test is what doubles it: read, write the test pattern, read it
+        // back, put the original contents back. Splitting it out of the read is
+        // worth those 28 transfers — about 1.1 ms — on every call that only reads.
+        assert_eq!(transfers(|board| board.self_test()), 56);
     }
 }

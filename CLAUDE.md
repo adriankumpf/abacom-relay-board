@@ -37,7 +37,7 @@ is needed. CI runs fmt, the tests, both clippy feature sets, and `cargo doc` wit
 
 Five-layer design — `Usb` finds, `Board` is the device, `A6275` is the protocol, `Ch341a` is the wire:
 
-1. **Public API** (`src/lib.rs`) — `Usb` is a libusb context and finds boards; `usb.board(port)` returns a `Board`, which has `relays()`, `set_relays()` and `reset_device()`. The optional USB port number disambiguates multiple boards.
+1. **Public API** (`src/lib.rs`) — `Usb` is a libusb context and finds boards; `usb.board(port)` returns a `Board`, which has `relays()`, `set_relays()`, `self_test()` and `reset_device()`. The optional USB port number disambiguates multiple boards.
 2. **Relay addressing** (`src/relays.rs`) — `Relay` (one relay, 1–8) and `Relays` (a set of them). `Relay::bit()` is the only place the relay-number-to-bit mapping is written down.
 3. **Shift register protocol** (`src/lib.rs`) — `A6275<T: Gpio>` clocks bits in and out. Private, and the only layer the tests exercise directly.
 4. **CH341A protocol** (`src/ch341a.rs`) — Low-level USB bulk transfers via `rusb`. No `unsafe` code. Exposes `set_output()` and `sample_clocked()` through the `Gpio` trait, which lets the shift register protocol be tested without hardware.
@@ -52,7 +52,7 @@ Error types live in `src/errors.rs` using `thiserror`.
 - CH341A uses two commands: `0xA1` (set D0–D7 outputs, one transfer per line change) and `0xAB` (UIO stream — a short program of pin states in one packet, used to read the whole shift register in two transfers). Reading the register is batched; writing it is not, because the CH341A outruns the DATA line's slew rate
 - USB device identified by vendor `0x1a86` / product `0x5512`
 - `Verify::Enabled` makes `Board::set_relays()` read back the shift register after latching and compare
-- `Board::relays()` includes a health check: writes an inverted test pattern to the shift register (without latching) and verifies the read-back
+- `Board::relays()` is a plain read; `Board::self_test()` is the separate health check, which writes an inverted test pattern to the shift register (without latching), verifies the read-back and restores the register. It costs as much again as a read, which is why it is not on the read path
 - `Usb::new()` is expensive (~6.5 ms, almost entirely `libusb_init`) and everything else per call is ~50 µs, so a context is meant to be created once and kept. `Board` holds a port selector, never a resolved device or a claim: it finds and claims per call, so it never locks another application out of a shared board
 - `0` is a CLI-only spelling of "all off" — the library has no such relay. Keep that sentinel in `src/bin/arb.rs`
 - Requires system `libusb` at compile time

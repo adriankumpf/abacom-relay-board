@@ -59,6 +59,14 @@
   USB fault even though it is a normal and retryable condition on a shared board.
   Breaking for callers: a `match` arm on `Error::Usb(rusb::Error::Busy)` stops
   firing and falls through to the wildcard `#[non_exhaustive]` already requires
+- Split the board's self-test out of `Board::relays`, which is now a plain read.
+  Reading performed a hidden read-modify-write — an inverted test pattern written
+  to the shift register, read back and undone — that doubled its cost, was not
+  mentioned by its name, and had no counterpart on `set_relays`, so which notion
+  of "did the device answer correctly" applied depended on which method you
+  called. The check is now `Board::self_test()`, and a read costs 28 transfers
+  rather than 56 — roughly 2.4 ms to 1.2 ms. **Callers that relied on reading to
+  vet the board must call `self_test()` themselves**; `arb --status` still does
 - Render `Relays::NONE` as `none` rather than as the empty string. `Display` is
   what error messages and `arb --status` interpolate, and an empty set previously
   rendered as nothing at all — `Active relays: ` — which reads as a bug rather
@@ -68,16 +76,18 @@
 
 - Read the shift register in a single CH341A UIO stream instead of one USB
   transfer per line change. A read costs 2 transfers rather than 33 — one packet
-  of pin states out, one packet of samples back — which takes `Board::relays()`
-  from 118 transfers to 56 and `set_relays` with `Verify::Enabled` from 87 to
-  56: roughly 4.9 ms to 2.4 ms and 3.6 ms to 2.4 ms at the measured ~41 µs per
-  transfer. The stream claims the lines it drives, so opening a board still sends
+  of pin states out, one packet of samples back — which takes `set_relays` with
+  `Verify::Enabled` from 87 transfers to 56 and the inverted-pattern check now
+  called `Board::self_test()` from 118 to 56: roughly 3.6 ms to 2.4 ms and 4.9 ms
+  to 2.4 ms at the measured ~41 µs per transfer. The stream claims the lines it drives, so opening a board still sends
   nothing. The write path is deliberately left alone: the CH341A emits stream
   states faster than the DATA line settles, so a batched write clocks in the
   previous bit
 
 ### Added
 
+- `Board::self_test()`, the read-back check that `Board::relays` used to perform
+  on the way past. It moves no relay, so it is safe to call on a live board
 - `Error::InvalidRelay` for relay numbers outside 1–8
 
 ### Fixed

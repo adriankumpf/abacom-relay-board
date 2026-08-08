@@ -54,8 +54,8 @@ pub enum Error {
     #[error("unexpected usb transfer length: expected {expected} bytes, got {actual}")]
     UnexpectedTransferLength { expected: usize, actual: usize },
 
-    /// The board's self-test failed: a test pattern did not survive the round trip
-    /// through the shift register.
+    /// [`Board::self_test`](crate::Board::self_test) failed: a test pattern did not
+    /// survive the round trip through the shift register.
     ///
     /// The pattern is written without latching, so the relays were never touched
     /// and only the read path is suspect. That is the difference from
