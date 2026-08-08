@@ -66,6 +66,13 @@ fn run() -> Result<(), Box<dyn Error>> {
     let board = arb::Usb::new()?.board(args.port);
 
     if args.status {
+        // The library keeps the check off the read path for callers that read
+        // thousands of times; a one-shot CLI is the opposite case. It pays another
+        // ~2.3 ms on top of the ~6.5 ms this process already spent initialising
+        // libusb, and printing state that a flaky board invented is exactly the
+        // failure a person reading it wants caught.
+        board.self_test()?;
+
         let relays = board.relays()?;
 
         writeln!(io::stdout(), "Active relays: {relays}")?;
