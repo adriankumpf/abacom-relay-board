@@ -42,7 +42,9 @@ fn main() -> Result<(), arb::Error> {
 A `Usb` is cheap to clone and `Send + Sync`, and a `Board` claims the device only
 for the duration of a call, so it never locks another application out of a board
 they share. Pass `Some(port)` to `usb.board` to pick one of several boards, or
-enumerate them with `usb.boards()`.
+enumerate them with `usb.boards()`. A port number is only unique among one hub's
+ports, so to write down *which* board and get it back later, store the
+`board.location()` of an enumerated board and pass it to `usb.board_at()`.
 
 #### As binary
 
@@ -50,7 +52,10 @@ Clone the repository and build the binary with `cargo build --features=build-bin
 
 ```console
 $ arb --list
-port 3 (bus 1, path 1.3)
+port 3 (1-1.3)
+
+$ arb --port 1-1.3 --status   # `--port` takes what `--list` prints
+Active relays: none
 
 $ arb 1 3        # activate relays 1 and 3
 $ arb --status

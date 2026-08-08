@@ -2,6 +2,7 @@ use clap::{ArgGroup, CommandFactory, Parser, value_parser};
 
 use std::error::Error;
 use std::io::{self, Write};
+use std::num::IntErrorKind;
 use std::str::FromStr;
 
 use arb::{Location, Relay, Relays, Usb, Verify};
@@ -27,25 +28,18 @@ impl FromStr for Target {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, String> {
-        if let Ok(port) = s.parse::<u8>() {
-            return Ok(Target::Port(port));
-        }
-
-        if !s.is_empty() && s.bytes().all(|byte| byte.is_ascii_digit()) {
-            return Err(format!("port numbers run from 0 to 255, got `{s}`"));
-        }
-
-        s.parse()
-            .map(Target::At)
-            .map_err(|e: arb::Error| e.to_string())
-    }
-}
-
-impl Target {
-    fn board(self, usb: &Usb) -> arb::Board {
-        match self {
-            Target::Port(port) => usb.board(Some(port)),
-            Target::At(location) => usb.board_at(location),
+        match s.parse::<u8>() {
+            Ok(port) => Ok(Target::Port(port)),
+            // The integer parser has already said whether this was a number at
+            // all, so asking it rather than re-scanning the digits leaves one
+            // notion of "is a port" instead of two to keep in step.
+            Err(e) if *e.kind() == IntErrorKind::PosOverflow => {
+                Err(format!("port numbers run from 0 to 255, got `{s}`"))
+            }
+            Err(_) => s
+                .parse()
+                .map(Target::At)
+                .map_err(|e: arb::Error| e.to_string()),
         }
     }
 }
@@ -129,7 +123,8 @@ fn run() -> Result<(), Box<dyn Error>> {
     }
 
     let board = match args.port {
-        Some(target) => target.board(&usb),
+        Some(Target::Port(port)) => usb.board(Some(port)),
+        Some(Target::At(location)) => usb.board_at(location),
         None => usb.board(None),
     };
 

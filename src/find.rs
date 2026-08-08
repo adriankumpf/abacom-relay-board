@@ -152,8 +152,8 @@ impl Select {
     /// The location this names, if it names one unambiguously.
     pub fn location(&self) -> Option<&Location> {
         match self {
+            Select::Any | Select::Port(_) => None,
             Select::At(location) => Some(location),
-            _ => None,
         }
     }
 }

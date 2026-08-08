@@ -210,10 +210,11 @@ pub struct Board {
 impl Board {
     /// Returns the USB port this board is named by, if it names one.
     ///
-    /// A label, not an identifier: boards from [`Usb::boards`] always have one, but
-    /// feeding it back to [`Usb::board`] can be ambiguous where the enumerated board
-    /// is not. `None` only for `usb.board(None)`, which names no particular board.
-    /// Use [`Display`](fmt::Display) to tell two boards apart.
+    /// A label, not an identifier: a board that names a [`Location`] always has one,
+    /// but feeding it back to [`Usb::board`] can be ambiguous where the location is
+    /// not. `None` only for `usb.board(None)`, which names no particular board. Use
+    /// [`Board::location`] to store which board this is, and
+    /// [`Display`](fmt::Display) to tell two boards apart.
     pub fn port(&self) -> Option<u8> {
         self.select.port()
     }
