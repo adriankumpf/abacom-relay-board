@@ -217,7 +217,9 @@ impl Usb {
 /// One relay board, found and claimed afresh for the duration of every call.
 ///
 /// Holds no device and no claim between calls, so several `Board`s — in this
-/// process or in another application — can drive the same hardware.
+/// process or in another application — can drive the same hardware. Two calls
+/// that do overlap are not serialised: the loser gets [`Error::Busy`] and should
+/// retry.
 #[derive(Clone, Debug)]
 pub struct Board {
     usb: Usb,
@@ -235,6 +237,7 @@ impl Board {
     ///
     /// * [`Error::NotFound`] — no relay board detected
     /// * [`Error::MultipleFound`] — multiple boards detected and no port was given
+    /// * [`Error::Busy`] — another application is talking to the board
     /// * [`Error::SelfTestFailed`] — device did not respond correctly to the read-back test
     ///
     /// # Example
@@ -266,6 +269,7 @@ impl Board {
     ///
     /// * [`Error::NotFound`] — no relay board detected
     /// * [`Error::MultipleFound`] — multiple boards detected and no port was given
+    /// * [`Error::Busy`] — another application is talking to the board
     /// * [`Error::VerificationFailed`] — the read-back did not match `relays`, which
     ///   carries both sets. The relays were latched first, so their physical state
     ///   is unknown
@@ -294,11 +298,15 @@ impl Board {
     ///
     /// * [`Error::NotFound`] — no relay board detected
     /// * [`Error::MultipleFound`] — multiple boards detected and no port was given
+    /// * [`Error::Busy`] — another application is talking to the board
     pub fn reset_device(&self) -> Result<()> {
         self.claim()?.reset()
     }
 
     /// Finds the board and claims its CH341A interface for the duration of one call.
+    ///
+    /// The claim is exclusive, so this is where a board busy with another
+    /// application is reported.
     fn claim(&self) -> Result<Ch341a> {
         Ch341a::open(&find_device(&self.usb.0, self.port)?)
     }

@@ -58,6 +58,10 @@
 ### Added
 
 - `Error::InvalidRelay` for relay numbers outside 1–8
+- `Error::Busy` for a board whose USB interface another application currently
+  holds. It previously arrived as `Error::Usb(rusb::Error::Busy)`, indistinguishable
+  from a real USB fault, even though it is a normal and retryable condition on a
+  board shared between applications
 
 ### Fixed
 

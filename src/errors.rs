@@ -24,6 +24,16 @@ pub enum Error {
     #[error("multiple relay boards found")]
     MultipleFound,
 
+    /// Another application holds the board's USB interface.
+    ///
+    /// Expected rather than exceptional: the interface is claimed exclusively, but
+    /// only for the duration of a single call, so a board shared between
+    /// applications produces this whenever two calls overlap. Retrying is the
+    /// remedy — unlike [`Error::Usb`], which it used to arrive as, this says
+    /// nothing is wrong with the board.
+    #[error("the relay board is in use by another application")]
+    Busy,
+
     /// The relay state read back after `set_relays` did not match the requested state.
     ///
     /// The relays were latched before the read-back, so the physical relay state is
