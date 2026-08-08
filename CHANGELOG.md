@@ -43,8 +43,10 @@ Code holding raw masks converts at the boundary with `Relays::from_bits(u8)` and
   so one context can serve every thread. `Board` is free to build, resolves
   nothing until a method is called, and — as before — claims the USB interface
   only for the duration of one call, so it never locks another application out of
-  a shared board. Note that a reused context no longer self-heals: after repeated
-  failures, drop the `Usb` and build a new one
+  a shared board. Note that a reused context no longer self-heals: no error
+  reliably says a context has gone sour, so rather than trying to classify one,
+  drop the `Usb` and build a new one after *any* failed operation — it costs
+  ~6.5 ms and failures are rare
 - Rename the free functions to `Board::relays`, `Board::set_relays` and
   `Board::reset_device`. `reset(port)` in particular read like "turn all the
   relays off"; it is a USB reset and leaves the relay outputs untouched
@@ -122,12 +124,19 @@ Code holding raw masks converts at the boundary with `Relays::from_bits(u8)` and
   collision and `boards()` the way out. An empty list means no board is attached
   rather than `Error::NotFound`
 - `Board::port()`, so a caller can label the board it got, and `Display for
-  Board`, which renders an enumerated board as `port 3 (bus 1, path 1.3)` —
-  enough to tell apart two boards that share a port number
+  Board`, which renders an enumerated board as `port 3 (1-1.3)` — enough to tell
+  apart two boards that share a port number. The notation is the one `lsusb -t`
+  uses, so `arb --list` can be read beside it: these boards carry no serial
+  number and no product strings, so where a board is plugged in is the only
+  thing that distinguishes two of them
 - `arb --list`, which prints one line per attached board. Prints nothing when
   there is none, so the output stays readable line by line
 - `Board::self_test()`, the read-back check that `Board::relays` used to perform
-  on the way past. It moves no relay, so it is safe to call on a live board
+  on the way past. It moves no relay, so it is safe to call on a live board.
+  A diagnostic rather than a guard on the operating path: `set_relays` with
+  `Verify::Enabled` already covers the same ground inside one claim, and on the
+  value the caller actually asked for, so reach for `self_test()` at startup,
+  from a health check, or when a board is suspect
 - `Error::InvalidRelay` for relay numbers outside 1–8
 
 ### Fixed
