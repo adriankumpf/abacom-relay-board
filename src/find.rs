@@ -49,15 +49,17 @@ impl Path {
     }
 }
 
+/// The `lsusb -t` spelling: `1-1.3` is port 3 of the hub on port 1 of bus 1.
+///
+/// Deliberately the same notation the system tools use, because that is the only
+/// way to tell several identical boards apart — they carry no serial number, so
+/// `arb --list` beside `lsusb -t` is how an operator works out which is which.
 impl fmt::Display for Path {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "bus {}, path ", self.bus)?;
+        write!(f, "{}", self.bus)?;
 
         for (hop, port) in self.hops.iter().enumerate() {
-            if hop > 0 {
-                f.write_str(".")?;
-            }
-
+            f.write_str(if hop == 0 { "-" } else { "." })?;
             write!(f, "{port}")?;
         }
 
@@ -215,12 +217,19 @@ mod tests {
         assert_eq!(Select::Port(3).to_string(), "port 3");
         assert_eq!(
             Select::Path(Path::new(1, [1, 3])).to_string(),
-            "port 3 (bus 1, path 1.3)"
+            "port 3 (1-1.3)"
         );
-        assert_eq!(
-            Select::Path(Path::new(2, [4])).to_string(),
-            "port 4 (bus 2, path 4)"
-        );
+        assert_eq!(Select::Path(Path::new(2, [4])).to_string(), "port 4 (2-4)");
+    }
+
+    #[test]
+    fn a_path_renders_the_way_lsusb_spells_it() {
+        // `arb --list` is read beside `lsusb -t`, so the notation has to match it
+        // exactly: identical boards carry no serial, and this is all that tells
+        // them apart.
+        assert_eq!(Path::new(1, [3]).to_string(), "1-3");
+        assert_eq!(Path::new(1, [1, 3]).to_string(), "1-1.3");
+        assert_eq!(Path::new(2, [1, 2, 3]).to_string(), "2-1.2.3");
     }
 
     #[test]

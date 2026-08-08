@@ -44,13 +44,19 @@ for the duration of a call, so it never locks another application out of a board
 they share. Pass `Some(port)` to `usb.board` to pick one of several boards, or
 enumerate them with `usb.boards()`.
 
+These boards report no serial number and no product strings, so where a board is
+plugged in is the only thing telling two of them apart — see *Telling boards
+apart* in the [API docs](https://docs.rs/arb). Label the cables if the relays
+drive anything that must not be actuated by mistake.
+
 #### As binary
 
 Clone the repository and build the binary with `cargo build --features=build-binary --release`.
 
 ```console
-$ arb --list
-port 3 (bus 1, path 1.3)
+$ arb --list     # the `1-1.3` notation matches `lsusb -t`
+port 1 (1-1)
+port 5 (1-5)
 
 $ arb 1 3        # activate relays 1 and 3
 $ arb --status

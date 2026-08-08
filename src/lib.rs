@@ -10,6 +10,26 @@
 //! stores that set as an 8-bit shift register mask, with relay 1 in the least
 //! significant bit, but only [`Relays::from_bits`] and [`Relays::bits`] expose it.
 //!
+//! # Telling boards apart
+//!
+//! These boards carry no identity of their own. The CH341A reports no serial
+//! number and no manufacturer or product strings at all — every one answers to the
+//! same `1a86:5512` and nothing else — so the only thing that distinguishes two of
+//! them is *where each is plugged in*.
+//!
+//! That has a consequence worth stating plainly: **if identical boards are
+//! unplugged and returned to different sockets, nothing in software can tell that
+//! they were swapped.** A configuration naming port 3 will drive whatever is now on
+//! port 3, and it will do so silently. Where that matters — and it does, if the
+//! relays drive things that must not be actuated by mistake — label the cables.
+//! Software cannot cover this one.
+//!
+//! Within a running system the addressing is stable: a port number is physical, so
+//! it survives the re-enumeration a [`Board::reset_device`] causes, where a USB
+//! device address would not. [`Usb::boards`] enumerates in a stable order, and
+//! `arb --list` prints each board in the same `1-1.3` notation `lsusb -t` uses, so
+//! the two can be read side by side.
+//!
 //! # Examples
 //!
 //! ```no_run
@@ -66,9 +86,23 @@ pub enum Verify {
 /// share across threads. It claims nothing and opens nothing, so contexts never
 /// conflict with each other or with another application using the same board.
 ///
-/// Not self-healing: if the USB controller resets or the host suspends, a `Usb`
-/// can go permanently sour. Callers that must survive that should drop it and
-/// build a new one after repeated failures.
+/// # Recovering from a soured context
+///
+/// A held context is not self-healing: if the USB controller resets or the host
+/// suspends, a `Usb` may go permanently sour where the per-call context of 0.7.1
+/// would have been rebuilt anyway.
+///
+/// Do not try to detect that. No error reliably distinguishes a dead context from
+/// a transient fault — libusb does not report one, so any classification here
+/// would be guesswork. `Usb::new` costs ~6.5 ms and failures are rare, so the
+/// robust policy is the simple one: **drop the context and build a new one after
+/// any failed operation**, with no threshold to tune and nothing to classify. The
+/// happy path is untouched.
+///
+/// Worth logging when that happens. This failure mode is inherited belief rather
+/// than something observed against this hardware — no consumer held a long-lived
+/// context before 0.8.0 — so if a rebuild never once restores service, this
+/// warning can come out.
 ///
 /// # Example
 ///
@@ -225,9 +259,21 @@ impl Board {
     /// pattern is never latched and the register's original contents are put back
     /// afterwards, so this is safe to call on a board driving live outputs.
     ///
+    /// A diagnostic, not a guard on the operating path. [`Board::set_relays`] with
+    /// [`Verify::Enabled`] already writes, latches, reads back and compares within
+    /// a single claim — that covers everything this covers, on the value the caller
+    /// actually asked for, plus the latch this deliberately never touches. And
+    /// because a `self_test` is its own claim, it vouches for no particular
+    /// [`relays`](Board::relays) call before or after it.
+    ///
+    /// So reach for it where a person or a monitor is asking "is this board still
+    /// healthy?" — at startup, from a health check, or when a board is suspect —
+    /// and not on the path of ordinary reads and writes. As a periodic probe it
+    /// beats a periodic read, because it knows what answer it should get; that is
+    /// early warning, not correctness.
+    ///
     /// Roughly doubles the cost of a read, which is why it is not part of
-    /// [`Board::relays`]: call it when a board is suspect, or periodically, rather
-    /// than on every read.
+    /// [`Board::relays`].
     ///
     /// # Errors
     ///
