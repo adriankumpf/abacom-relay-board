@@ -157,6 +157,25 @@ impl Usb {
 /// process or in another application — can drive the same hardware. Two calls
 /// that do overlap are not serialised: the loser gets [`Error::Busy`] and should
 /// retry.
+///
+/// # Atomicity
+///
+/// One call is atomic — a single claim spans all of it, read-back included — but
+/// a *sequence* of calls is not. [`relays`](Board::relays) followed by
+/// [`set_relays`](Board::set_relays) is two claims, so on a board shared with
+/// another application a write can land in the gap and be silently lost:
+///
+/// ```no_run
+/// # let usb = arb::Usb::new().unwrap();
+/// # let board = usb.board(None);
+/// // Racy on a shared board: a write between these two calls is overwritten.
+/// let active = board.relays().unwrap();
+/// board.set_relays(active | arb::Relay::Three, arb::Verify::Enabled).unwrap();
+/// ```
+///
+/// The board latches all eight relays at once, so there is no partial update to
+/// reach for instead. Where the hardware is shared and read-modify-write is
+/// unavoidable, coordinate outside this library.
 #[derive(Clone, Debug)]
 pub struct Board {
     usb: Usb,

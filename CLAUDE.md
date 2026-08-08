@@ -78,7 +78,7 @@ Investigated and rejected. The reasons are not visible from the code, which is w
 
 ## Known Limitation
 
-The library is atomic *within* a call — one claim spans the whole read-modify-write — but not *between* calls. `relays()` followed by `set_relays()` is two claims, so on a board shared with another application, a write can land in the gap and one side's change is silently lost. Closing it would need a scoped claim (`board.with_claim(|claimed| …)`) holding one `Ch341a` across a closure, which `Board` has room for without a redesign.
+The library is atomic *within* a call but not *between* calls: `relays()` followed by `set_relays()` is two claims, so on a shared board a write can land in the gap and one side's change is silently lost. Documented for consumers under `# Atomicity` on `Board` (`src/lib.rs`) — keep the two in step. Closing it rather than documenting it would need a scoped claim (`board.with_claim(|claimed| …)`) holding one `Ch341a` across a closure, which `Board` has room for without a redesign.
 
 ## Testing
 
