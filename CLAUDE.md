@@ -29,7 +29,7 @@ cargo fmt
 cargo test --features=build-binary
 ```
 
-Tests run against a simulated A6275 (`FakeA6275` in `src/lib.rs`), so no hardware
+Tests run against a simulated A6275 (`FakeA6275` in `src/a6275.rs`), so no hardware
 is needed. CI runs fmt, the tests, both clippy feature sets, and `cargo doc` with
 `RUSTDOCFLAGS=-D warnings`.
 
@@ -66,11 +66,11 @@ Investigated and rejected. The reasons are not visible from the code, which is w
 
 - **Batching the write path into a UIO stream.** D5 slew: the CH341A emits stream states faster than DATA settles, so the rising clock edge samples the previous bit. Reproduced byte-for-byte on two boards; splitting and padding both improve it and neither converges. Only the read path is batched
 - **Three writes per bit down to two.** The third write only brings CLK low, which the next iteration's first write already does. The *logic* half is settled — the change passes the full suite — so what is left is purely electrical: it moves the falling clock edge onto the data transition, on the same D5 that breaks the batched write. Worth 0.33 ms, and wants a bench check nobody has spent
-- **A separate `UIO_STM_DIR` transfer at open.** Measured at 38.99 µs against 41.44 µs per transfer, it more than doubled the open dance — paid by every call including `reset_device()`, which issues no GPIO at all. The `0xA1` message establishes the line directions by itself (the `0x3f` at index 6), and the read stream carries its own direction preamble, so neither path depends on the other having run and `Ch341a::open` sends nothing
+- **A separate `UIO_STM_DIR` transfer at open.** Measured at 38.99 µs against 41.44 µs for an ordinary transfer, it nearly doubles the ~50 µs of per-call overhead — and is paid by every call, including `reset_device()`, which issues no GPIO at all. Both GPIO paths carry the line directions themselves (see `OUTPUT_LINES` in `src/ch341a.rs`), so `Ch341a::open` sends nothing
 - **A board handle that holds the USB claim.** `claim_interface` is exclusive and boards are shared between applications, so a handle keeping it ends sharing rather than degrading it. `Board` is deliberately not this: it stores a selector and claims per call
 - **Caching the resolved device inside `Board`.** 4 µs, against a handle that goes stale on hot-plug
 - **Naming an enumerated board by `Device::address()`.** It is reassigned on re-enumeration, so a listed `Board` would go stale after `reset_device()` — which the downstream consumer calls on every retry. A port path survives that
-- **Sorting a `Vec` in `find_devices` instead of keying a `BTreeMap`.** `devices()` promises no order and `boards()[0]` must be the same board every call. A sort is a line a refactor can drop with no test noticing, and `find_devices` needs hardware to test; keying makes the ordering a property of the type instead
+- **Sorting a `Vec` in `find_devices` instead of keying a `BTreeMap`.** The reason is on `find_devices` itself; what is not written there is that `find_devices` needs hardware to test, so a dropped sort would not fail anything
 - **Partial updates (`board.turn_on(relay)`).** The hardware latches all 8 bits at once, so this would hide a read-modify-write behind a setter that looks atomic — actively dangerous on a shared board
 - **`CH341A_CMD_SPI_STREAM` (0xA8).** Byte-oriented SPI with hardware bit ordering — the wrong shape for bit-banging a shift register's latch
 - **A library-internal or `rusb::GlobalContext` singleton.** `GlobalContext` panics if `libusb_init` fails (fatal inside a NIF) and can never be rebuilt, so the drop-and-recreate recovery path would not exist. Any singleton also makes a policy decision on every consumer's behalf that the one-call-per-process CLI cannot use
