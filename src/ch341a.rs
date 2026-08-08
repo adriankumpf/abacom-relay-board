@@ -5,9 +5,13 @@
 //! - `ENDPOINT_IN` (0x82): device-to-host responses
 //!
 //! Two commands are used:
-//! - `0xA1` (set output): sets the state of the D0–D7 GPIO lines
-//! - `0xA0` (get input): reads back 6 bytes of pin state; only byte 0 (D0–D7) is
-//!   relevant for the relay board, where D7 is wired to the A6275 serial output
+//! - `0xA1` (set output): sets the state of the D0–D7 GPIO lines, one transfer per
+//!   line change
+//! - `0xAB` (UIO stream): runs a short program of pin states, so that reading a
+//!   whole shift register — sample, clock, sample, … — costs one transfer out and
+//!   one back rather than one transfer per state
+//!
+//! Each carries the line directions itself, so opening a board sends nothing.
 
 use std::time::Duration;
 
@@ -31,7 +35,33 @@ const INTERFACE: u8 = 0;
 /// strategy anyway".
 const TIMEOUT_WRITE: Duration = Duration::from_millis(1000);
 const TIMEOUT_READ: Duration = Duration::from_millis(1000);
-const GET_INPUT_RESPONSE_LEN: usize = 6;
+
+// The UIO stream command and the states that may appear in one. A stream is
+// `CMD_UIO_STREAM`, a sequence of states and `UIO_STM_END`, all in a single
+// packet: `OUT` drives the D0–D5 lines, `DIR` claims them as outputs, and `IN`
+// samples D0–D7 and appends one byte to the stream's response.
+const CMD_UIO_STREAM: u8 = 0xAB;
+const UIO_STM_IN: u8 = 0x00;
+const UIO_STM_END: u8 = 0x20;
+const UIO_STM_DIR: u8 = 0x40;
+const UIO_STM_OUT: u8 = 0x80;
+
+/// The D0–D5 lines that can be driven, as a direction mask.
+///
+/// Both command paths state it for themselves: the `0xA1` message carries it at
+/// index 6, and a UIO stream opens with it. Neither depends on the other having run.
+const OUTPUT_LINES: u8 = 0x3f;
+
+/// The CH341A's packet size. A UIO stream has to fit in one.
+const PACKET_LENGTH: usize = 0x20;
+
+/// What one sample costs a stream: read, clock high, clock low.
+const STATES_PER_SAMPLE: usize = 3;
+
+/// The most samples one stream can take, in what is left of a packet once the
+/// command, the two states that open the stream and the terminator are accounted
+/// for.
+const MAX_SAMPLES: usize = (PACKET_LENGTH - 4) / STATES_PER_SAMPLE;
 
 pub type Device = rusb::Device<rusb::Context>;
 type DeviceHandle = rusb::DeviceHandle<rusb::Context>;
@@ -42,6 +72,33 @@ fn expect_transfer_len(actual: usize, expected: usize) -> Result<()> {
     }
 
     Err(Error::UnexpectedTransferLength { expected, actual })
+}
+
+/// Encodes the UIO stream behind [`Gpio::sample_clocked`].
+///
+/// The stream claims the lines it drives, so it depends on nothing having been set
+/// up before it — the same two states, in the same order, that flashrom's
+/// `enable_pins` uses: drive everything low, then switch the drivers on. Loading the
+/// output latch first matters, because D0 is the A6275 latch and enabling the
+/// drivers over an undefined latch would assert it.
+///
+/// Returns the packet and the number of bytes used.
+fn sample_stream(clock: u8, samples: usize) -> ([u8; PACKET_LENGTH], usize) {
+    let mut packet = [0u8; PACKET_LENGTH];
+
+    packet[0] = CMD_UIO_STREAM;
+    packet[1] = UIO_STM_OUT; // every line low, `clock` included
+    packet[2] = UIO_STM_DIR | OUTPUT_LINES;
+
+    let end = 3 + samples * STATES_PER_SAMPLE;
+
+    for states in packet[3..end].chunks_exact_mut(STATES_PER_SAMPLE) {
+        states.copy_from_slice(&[UIO_STM_IN, UIO_STM_OUT | clock, UIO_STM_OUT]);
+    }
+
+    packet[end] = UIO_STM_END;
+
+    (packet, end + 1)
 }
 
 /// Returns whether `device` is a CH341A in parallel/GPIO mode.
@@ -65,11 +122,15 @@ pub trait Gpio {
     /// - Bit 5 (0x20): A6275 Serial DATA in
     fn set_output(&self, data: u8) -> Result<()>;
 
-    /// Reads the D0–D7 input lines and returns byte 0 (D7–D0).
+    /// Takes `N` readings of the D0–D7 input lines, one per pulse of `clock`.
     ///
-    /// On the ABACOM relay board, bit 7 (D7) carries the A6275 serial output,
-    /// used to read back the current shift register contents.
-    fn get_input(&self) -> Result<u8>;
+    /// Each reading is taken before `clock` goes high, so a device that shifts on
+    /// the rising edge is sampled once per bit, first bit first. Every line other
+    /// than `clock` is held low throughout, and all of them are left low.
+    ///
+    /// On the ABACOM relay board, bit 7 (D7) of each reading carries the A6275
+    /// serial output, which is how the shift register is read back.
+    fn sample_clocked<const N: usize>(&self, clock: u8) -> Result<[u8; N]>;
 }
 
 /// An opened CH341A with its bulk interface claimed.
@@ -110,34 +171,76 @@ impl Ch341a {
     pub fn reset(&self) -> Result<()> {
         Ok(self.handle.reset()?)
     }
-}
 
-impl Gpio for Ch341a {
-    fn set_output(&self, data: u8) -> Result<()> {
-        let msg = [
-            0xA1, 0x6a, 0x1f, 0x00, 0x10, data, 0x3f, 0x00, 0x00, 0x00, 0x00,
-        ];
-        let written = self.handle.write_bulk(ENDPOINT_OUT, &msg, TIMEOUT_WRITE)?;
+    /// Sends `msg` to the device, failing if it was not transferred whole.
+    fn write(&self, msg: &[u8]) -> Result<()> {
+        let written = self.handle.write_bulk(ENDPOINT_OUT, msg, TIMEOUT_WRITE)?;
 
         expect_transfer_len(written, msg.len())
     }
 
-    fn get_input(&self) -> Result<u8> {
-        let msg = [0xA0];
-        let written = self.handle.write_bulk(ENDPOINT_OUT, &msg, TIMEOUT_WRITE)?;
-        expect_transfer_len(written, msg.len())?;
+    /// Fills `buf` from the device, failing if it was not transferred whole.
+    fn read(&self, buf: &mut [u8]) -> Result<()> {
+        let read = self.handle.read_bulk(ENDPOINT_IN, buf, TIMEOUT_READ)?;
 
-        let mut buf = [0u8; GET_INPUT_RESPONSE_LEN];
-        let len = self.handle.read_bulk(ENDPOINT_IN, &mut buf, TIMEOUT_READ)?;
-        expect_transfer_len(len, buf.len())?;
+        expect_transfer_len(read, buf.len())
+    }
+}
 
-        Ok(buf[0])
+impl Gpio for Ch341a {
+    fn set_output(&self, data: u8) -> Result<()> {
+        #[rustfmt::skip]
+        let msg = [
+            0xA1, 0x6a, 0x1f, 0x00, 0x10, data, OUTPUT_LINES, 0x00, 0x00, 0x00, 0x00,
+        ];
+
+        self.write(&msg)
+    }
+
+    fn sample_clocked<const N: usize>(&self, clock: u8) -> Result<[u8; N]> {
+        const { assert!(N <= MAX_SAMPLES, "a UIO stream must fit one packet") };
+
+        let (packet, len) = sample_stream(clock, N);
+        self.write(&packet[..len])?;
+
+        // One byte per `UIO_STM_IN`, in the order the stream ran them.
+        let mut samples = [0u8; N];
+        self.read(&mut samples)?;
+
+        Ok(samples)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A clock line. Which one is the protocol layer's business, not this module's.
+    const CLOCK: u8 = 0x08;
+
+    #[test]
+    fn a_sample_stream_reads_before_every_rising_clock_edge() {
+        let (packet, len) = sample_stream(CLOCK, 2);
+
+        assert_eq!(
+            &packet[..len],
+            &[
+                0xAB, // UIO stream
+                0x80, // every line low
+                0x7f, // D0–D5 are outputs, now that they hold a defined value
+                0x00, 0x88, 0x80, // read, clock high, clock low
+                0x00, 0x88, 0x80, // read, clock high, clock low
+                0x20, // end
+            ]
+        );
+    }
+
+    #[test]
+    fn the_longest_stream_fits_one_packet() {
+        let (_, len) = sample_stream(CLOCK, MAX_SAMPLES);
+
+        assert!(len <= PACKET_LENGTH, "{len} bytes exceeds {PACKET_LENGTH}");
+    }
 
     #[test]
     fn expect_transfer_len_accepts_exact_length() {

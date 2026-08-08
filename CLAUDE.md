@@ -40,7 +40,7 @@ Five-layer design — `Usb` finds, `Board` is the device, `A6275` is the protoco
 1. **Public API** (`src/lib.rs`) — `Usb` is a libusb context and finds boards; `usb.board(port)` returns a `Board`, which has `relays()`, `set_relays()` and `reset_device()`. The optional USB port number disambiguates multiple boards.
 2. **Relay addressing** (`src/relays.rs`) — `Relay` (one relay, 1–8) and `Relays` (a set of them). `Relay::bit()` is the only place the relay-number-to-bit mapping is written down.
 3. **Shift register protocol** (`src/lib.rs`) — `A6275<T: Gpio>` clocks bits in and out. Private, and the only layer the tests exercise directly.
-4. **CH341A protocol** (`src/ch341a.rs`) — Low-level USB bulk transfers via `rusb`. No `unsafe` code. Exposes `set_output()` and `get_input()` through the `Gpio` trait, which lets the shift register protocol be tested without hardware.
+4. **CH341A protocol** (`src/ch341a.rs`) — Low-level USB bulk transfers via `rusb`. No `unsafe` code. Exposes `set_output()` and `sample_clocked()` through the `Gpio` trait, which lets the shift register protocol be tested without hardware.
 5. **CLI** (`src/bin/arb.rs`) — `clap`-derived argument parser. Only compiled with `build-binary` feature.
 
 Error types live in `src/errors.rs` using `thiserror`.
@@ -49,7 +49,7 @@ Error types live in `src/errors.rs` using `thiserror`.
 
 - The board stores relay state as an 8-bit shift register mask (bit 0 = relay 1, bit 7 = relay 8; `1` = active). Outside `Relay::bit()`, work with `Relay`/`Relays` rather than raw bits
 - Communication uses the Allegro A6275 shift register protocol (SPI-like: DATA, CLK, LATCH pins on CH341A GPIO lines D5, D3, D0; serial out read from D7)
-- CH341A uses two commands: `0xA1` (set D0–D7 outputs) and `0xA0` (read D0–D7 inputs, returns 6 bytes but only byte 0 is used)
+- CH341A uses two commands: `0xA1` (set D0–D7 outputs, one transfer per line change) and `0xAB` (UIO stream — a short program of pin states in one packet, used to read the whole shift register in two transfers). Reading the register is batched; writing it is not, because the CH341A outruns the DATA line's slew rate
 - USB device identified by vendor `0x1a86` / product `0x5512`
 - `Verify::Enabled` makes `Board::set_relays()` read back the shift register after latching and compare
 - `Board::relays()` includes a health check: writes an inverted test pattern to the shift register (without latching) and verifies the read-back

@@ -87,20 +87,16 @@ impl<T: Gpio> A6275<T> {
 
     /// Clocks the 8 bits of the A6275 shift register out of its serial output (D7).
     ///
+    /// One clocked read, so two USB transfers rather than one per line change.
+    ///
     /// Destructive: reading shifts zeros in, so the caller must restore the register
     /// with [`A6275::shift_out_bits`] if its contents still matter.
     fn read_shift_register(&self) -> Result<u8> {
         let mut status = 0;
 
-        self.gpio.set_output(0)?;
-
-        for bit in (0..8).rev() {
-            if self.gpio.get_input()? & READ != 0 {
-                status |= 1 << bit;
-            }
-
-            self.gpio.set_output(CLK)?;
-            self.gpio.set_output(0)?;
+        // The register presents its most significant bit first.
+        for sample in self.gpio.sample_clocked::<8>(CLK)? {
+            status = status << 1 | u8::from(sample & READ != 0);
         }
 
         Ok(status)
@@ -345,10 +341,24 @@ mod tests {
             Ok(())
         }
 
-        fn get_input(&self) -> Result<u8> {
-            let serial_out = self.register.get() & MSB != 0;
+        /// Drives the sampling one state at a time, exactly as the pin states a
+        /// UIO stream runs would: batching it on the wire must not change what the
+        /// device sees.
+        fn sample_clocked<const N: usize>(&self, clock: u8) -> Result<[u8; N]> {
+            let mut samples = [0; N];
 
-            Ok(if serial_out { READ } else { 0 })
+            self.set_output(0)?;
+
+            for sample in &mut samples {
+                let serial_out = self.register.get() & MSB != 0;
+
+                *sample = if serial_out { READ } else { 0 };
+
+                self.set_output(clock)?;
+                self.set_output(0)?;
+            }
+
+            Ok(samples)
         }
     }
 
@@ -360,13 +370,46 @@ mod tests {
             Ok(())
         }
 
-        fn get_input(&self) -> Result<u8> {
-            Ok(0)
+        fn sample_clocked<const N: usize>(&self, _clock: u8) -> Result<[u8; N]> {
+            Ok([0; N])
+        }
+    }
+
+    /// Counts USB transfers on their way to a simulated board: one for a line
+    /// change, and one out plus one back for a clocked read.
+    struct Counting {
+        gpio: FakeA6275,
+        transfers: Cell<usize>,
+    }
+
+    impl Gpio for Counting {
+        fn set_output(&self, data: u8) -> Result<()> {
+            self.transfers.set(self.transfers.get() + 1);
+
+            self.gpio.set_output(data)
+        }
+
+        fn sample_clocked<const N: usize>(&self, clock: u8) -> Result<[u8; N]> {
+            self.transfers.set(self.transfers.get() + 2);
+
+            self.gpio.sample_clocked(clock)
         }
     }
 
     fn fake() -> A6275<FakeA6275> {
         A6275::new(FakeA6275::default())
+    }
+
+    /// Runs `call` against a counting board and returns the transfers it cost.
+    fn transfers<R>(call: impl FnOnce(&A6275<Counting>) -> Result<R>) -> usize {
+        let board = A6275::new(Counting {
+            gpio: FakeA6275::default(),
+            transfers: Cell::new(0),
+        });
+
+        call(&board).unwrap();
+
+        board.gpio.transfers.get()
     }
 
     #[test]
@@ -491,5 +534,29 @@ mod tests {
         let err = A6275::new(StuckLow).get_status().unwrap_err();
 
         assert!(matches!(err, Error::SelfTestFailed));
+    }
+
+    #[test]
+    fn the_protocol_costs_the_transfers_it_should() {
+        // The point of the clocked read: 33 transfers as one write and one read per
+        // bit, 2 as a single stream. At the measured ~41 µs per transfer that is
+        // 1.4 ms against 0.1 ms, and it is why the two totals below are 56 and not
+        // 87 and 118.
+        assert_eq!(transfers(|board| board.read_shift_register()), 2);
+
+        // Writing is still one transfer per line change: 8 bits × 3 states, plus the
+        // low state either side. It stays that way deliberately: the CH341A emits
+        // stream states faster than the DATA line settles, so a batched write clocks
+        // in the previous bit.
+        assert_eq!(transfers(|board| board.shift_out_bits(0b1010_1010)), 26);
+
+        // Plus the two states that latch the outputs.
+        assert_eq!(transfers(|board| board.set_status(0, Verify::Disabled)), 28);
+
+        // Verifying adds a read and the restore that a destructive read costs.
+        assert_eq!(transfers(|board| board.set_status(0, Verify::Enabled)), 56);
+
+        // Read, then the self-test's pattern, read and restore.
+        assert_eq!(transfers(|board| board.get_status()), 56);
     }
 }
