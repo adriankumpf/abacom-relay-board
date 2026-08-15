@@ -167,6 +167,13 @@ Code holding raw masks converts at the boundary with `Relays::from_bits(u8)` and
   itself failed, so there is nothing to put back) the caller is told so with
   `Error::RegisterOutOfSync` rather than being handed a transport error that
   invites exactly that retry
+- Put the *latched* value back into the shift register after a failed
+  verification, rather than the value that was read back. The read path is the one
+  a mismatch implicates, so leaving its answer in the register made the next read
+  agree with the fault instead of with the relays. Note that reading a board back
+  cannot settle what a mismatch left behind either way: the A6275 hands back its
+  shift register, not its outputs. `Error::VerificationFailed` said otherwise and
+  has been corrected
 - Discard a stale UIO stream response after a clocked read fails. The device
   queues the stream's answer as the stream runs, so a read that timed out left
   eight bytes in the IN endpoint that nothing consumed, and the next read took

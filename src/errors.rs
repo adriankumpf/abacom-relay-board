@@ -42,8 +42,16 @@ pub enum Error {
 
     /// The relay state read back after `set_relays` did not match the requested state.
     ///
-    /// The relays were latched before the read-back, so the physical relay state is
-    /// unknown: `expected`, `actual` or neither. Read the board back to find out.
+    /// The relays were latched before the read-back, so their physical state is
+    /// unknown: `expected`, `actual` or neither. Reading the board again does not
+    /// settle it, because the A6275 hands back its shift register rather than its
+    /// outputs, and the register is left holding `expected`: the value that was
+    /// latched, and the one a read puts back.
+    ///
+    /// What a read can separate is which half is at fault:
+    /// [`self_test`](crate::Board::self_test) exercises the read path on its own,
+    /// without latching, so a board that then fails it was misreporting rather than
+    /// misdriving. Either way the way back to a known state is to write it again.
     #[error("verification failed: expected {expected}, read back {actual}")]
     VerificationFailed {
         /// The relays that were requested.

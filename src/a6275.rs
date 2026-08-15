@@ -98,7 +98,12 @@ impl<T: Gpio> A6275<T> {
         self.gpio.set_output(0)?;
 
         if verify == Verify::Enabled {
-            let read = self.status()?;
+            // The outputs hold `status` now, so that is what the register has to be
+            // left holding, on a mismatch as much as on a match. Putting the
+            // read-back value there instead would leave the register carrying a
+            // figure that came from the very path the mismatch implicates, and the
+            // next read would report relays nobody asked for.
+            let read = self.restoring(status, || self.read_shift_register())?;
 
             if read != status {
                 return Err(Error::VerificationFailed {
@@ -473,6 +478,22 @@ mod tests {
         // outputs without any relay having moved.
         assert_eq!(board.gpio.0.register.get(), 0b0011_0101);
         assert_eq!(board.gpio.0.outputs.get(), 0b0011_0101);
+    }
+
+    #[test]
+    fn a_failed_verification_leaves_the_latched_value_in_the_register() {
+        let board = flaky();
+
+        let err = board.set_status(0b1000_0001, Verify::Enabled).unwrap_err();
+
+        assert!(matches!(err, Error::VerificationFailed { .. }));
+
+        // The read dropped the top bit, and the outputs hold what was latched, so
+        // the register has to hold that too. Leaving the read-back value there
+        // would make the next read agree with the fault rather than with the
+        // relays, and it is the read path the mismatch implicates.
+        assert_eq!(board.gpio.0.register.get(), 0b1000_0001);
+        assert_eq!(board.gpio.0.outputs.get(), 0b1000_0001);
     }
 
     #[test]
