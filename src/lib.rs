@@ -39,8 +39,11 @@
 //! let usb = Usb::new().unwrap();
 //! let board = usb.board(None);
 //!
-//! // Confirm the board is answering — worth doing once, not on every read
-//! board.self_test().unwrap();
+//! // Confirm the board is answering, worth doing once and not on every read. The
+//! // check has to read the register before it can test it, so it hands back what
+//! // it found there and a separate `relays()` call would only ask again.
+//! let active = board.self_test().unwrap();
+//! println!("active at startup: {active}");
 //!
 //! // Activate relays 1 and 3
 //! board.set_relays(Relay::One | Relay::Three, Verify::Enabled).unwrap();
@@ -230,7 +233,10 @@ impl Board {
     /// Returns the relays that are currently active.
     ///
     /// Takes the shift register at its word: [`Board::self_test`] is the separate
-    /// check that the board is still answering correctly.
+    /// check that the board is still answering correctly. That check returns this
+    /// same value, so there is nothing to gain by following one with this call: it
+    /// would be a second claim, 28 more transfers, and on a shared board a write
+    /// can land in the gap and make the two disagree.
     ///
     /// # Errors
     ///
