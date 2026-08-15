@@ -237,6 +237,8 @@ impl Board {
     /// * [`Error::NotFound`] — no relay board detected
     /// * [`Error::MultipleFound`] — more than one board answers to this one
     /// * [`Error::Busy`] — another application is talking to the board
+    /// * [`Error::RegisterOutOfSync`] — the read was interrupted, or the write that
+    ///   puts back what it consumed was, so reading again is not the remedy
     ///
     /// # Example
     ///
@@ -281,6 +283,8 @@ impl Board {
     /// * [`Error::MultipleFound`] — more than one board answers to this one
     /// * [`Error::Busy`] — another application is talking to the board
     /// * [`Error::SelfTestFailed`] — the test pattern did not survive the round trip
+    /// * [`Error::RegisterOutOfSync`] — the check was interrupted and could not put
+    ///   the register's contents back
     pub fn self_test(&self) -> Result<()> {
         A6275::new(self.claim()?).self_test()
     }
@@ -299,6 +303,8 @@ impl Board {
     /// * [`Error::MultipleFound`] — more than one board answers to this one
     /// * [`Error::Busy`] — another application is talking to the board
     /// * [`Error::VerificationFailed`] — the read-back did not match `relays`
+    /// * [`Error::RegisterOutOfSync`] — the read-back was interrupted and could not
+    ///   put the latched value back into the register
     ///
     /// # Example
     ///

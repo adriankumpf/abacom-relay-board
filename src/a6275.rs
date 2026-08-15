@@ -68,6 +68,25 @@ impl<T: Gpio> A6275<T> {
         Ok(status)
     }
 
+    /// Puts `status` back into the register after a read consumed it.
+    fn restore(&self, status: u8) -> Result<()> {
+        self.shift_out_bits(status).map_err(Error::out_of_sync)
+    }
+
+    /// Runs `op`, then puts `status` back into the register whether it succeeded or not.
+    ///
+    /// Bailing out of a destructive read would leave the register holding the zeros
+    /// the read shifted in, so the next read would report relays as inactive while
+    /// the outputs still hold them. A failed restore outranks whatever `op` returned,
+    /// because it is the one that says later reads cannot be trusted.
+    fn restoring<R>(&self, status: u8, op: impl FnOnce() -> Result<R>) -> Result<R> {
+        let result = op();
+
+        self.restore(status)?;
+
+        result
+    }
+
     /// Shifts `status` into the A6275 and latches it to the relay outputs.
     ///
     /// If `verify` is [`Verify::Enabled`], reads back the shift register and returns
@@ -94,9 +113,9 @@ impl<T: Gpio> A6275<T> {
 
     /// Reads the shift register and puts back what reading it consumed.
     pub fn status(&self) -> Result<u8> {
-        let status = self.read_shift_register()?;
+        let status = self.read_shift_register().map_err(Error::out_of_sync)?;
 
-        self.shift_out_bits(status)?;
+        self.restore(status)?;
 
         Ok(status)
     }
@@ -105,15 +124,16 @@ impl<T: Gpio> A6275<T> {
     ///
     /// Writes the complement of the register's current contents without latching, so
     /// the relay outputs are never touched, reads it back and puts the original
-    /// contents back — including when the check fails, so that a failure does not
-    /// leave the register disagreeing with the latched outputs.
+    /// contents back on every path out, so that neither a failed check nor a failed
+    /// transfer leaves the register disagreeing with the latched outputs.
     pub fn self_test(&self) -> Result<()> {
-        let status = self.read_shift_register()?;
+        let status = self.read_shift_register().map_err(Error::out_of_sync)?;
         let test_status = !status;
 
-        self.shift_out_bits(test_status)?;
-        let read = self.read_shift_register()?;
-        self.shift_out_bits(status)?;
+        let read = self.restoring(status, || {
+            self.shift_out_bits(test_status)?;
+            self.read_shift_register()
+        })?;
 
         if read != test_status {
             return Err(Error::SelfTestFailed);
@@ -126,6 +146,7 @@ impl<T: Gpio> A6275<T> {
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
+    use std::error::Error as _;
 
     use super::*;
 
@@ -238,12 +259,69 @@ mod tests {
         }
     }
 
+    /// A board whose transport gives out part way through, so that the error paths
+    /// can be driven without a flaky board to hand.
+    ///
+    /// The clocked read hands its failure back *after* the simulated register has
+    /// been clocked out, which is the case that matters: on the wire the stream is
+    /// what clocks the register, so a response that never arrives has already cost
+    /// the contents.
+    struct FailingAfter {
+        gpio: FakeA6275,
+        reads: Cell<usize>,
+        writes: Cell<usize>,
+    }
+
+    impl FailingAfter {
+        /// Whether `budget` has a transfer left, spending it if so.
+        fn spend(budget: &Cell<usize>) -> Result<()> {
+            match budget.get() {
+                0 => Err(Error::Usb(rusb::Error::Timeout)),
+                left => {
+                    budget.set(left - 1);
+                    Ok(())
+                }
+            }
+        }
+    }
+
+    impl Gpio for FailingAfter {
+        fn set_output(&self, data: u8) -> Result<()> {
+            Self::spend(&self.writes)?;
+
+            self.gpio.set_output(data)
+        }
+
+        fn sample_clocked(&self, clock: u8) -> Result<[u8; SAMPLES]> {
+            let samples = self.gpio.sample_clocked(clock)?;
+
+            Self::spend(&self.reads)?;
+
+            Ok(samples)
+        }
+    }
+
     fn fake() -> A6275<FakeA6275> {
         A6275::new(FakeA6275::default())
     }
 
     fn flaky() -> A6275<FlakyRead> {
         A6275::new(FlakyRead(FakeA6275::default()))
+    }
+
+    /// A board holding `latched` in both its register and its outputs, that takes
+    /// `reads` clocked reads and `writes` line changes before answering [`Error::Usb`].
+    fn failing(latched: u8, reads: usize, writes: usize) -> A6275<FailingAfter> {
+        let board = A6275::new(FailingAfter {
+            gpio: FakeA6275::default(),
+            reads: Cell::new(reads),
+            writes: Cell::new(writes),
+        });
+
+        board.gpio.gpio.register.set(latched);
+        board.gpio.gpio.outputs.set(latched);
+
+        board
     }
 
     /// Runs `call` against a counting board and returns the transfers it cost.
@@ -395,6 +473,61 @@ mod tests {
         // outputs without any relay having moved.
         assert_eq!(board.gpio.0.register.get(), 0b0011_0101);
         assert_eq!(board.gpio.0.outputs.get(), 0b0011_0101);
+    }
+
+    #[test]
+    fn a_read_that_never_comes_back_reports_a_lost_register() {
+        let board = failing(0b0011_0101, 0, usize::MAX);
+
+        let err = board.status().unwrap_err();
+
+        // A plain transport error would invite a retry that succeeds and reports no
+        // relays at all on a board holding five.
+        assert!(matches!(err, Error::RegisterOutOfSync { .. }));
+        // The transport failure stays reachable through the source chain, which is
+        // what `{source}` in the message and a caller walking `Error::source` read.
+        assert!(err.source().is_some());
+        assert_eq!(board.gpio.gpio.register.get(), 0);
+        assert_eq!(board.gpio.gpio.outputs.get(), 0b0011_0101);
+    }
+
+    #[test]
+    fn a_restore_that_gives_out_part_way_reports_a_lost_register() {
+        // The read lands; the line changes that put it back do not.
+        let board = failing(0b1100_1001, 1, 5);
+
+        let err = board.status().unwrap_err();
+
+        assert!(matches!(err, Error::RegisterOutOfSync { .. }));
+        assert_ne!(board.gpio.gpio.register.get(), 0b1100_1001);
+    }
+
+    #[test]
+    fn a_failed_restore_outranks_the_failure_that_preceded_it() {
+        // Enough writes for the test pattern but not for the restore after it, so
+        // both halves fail: the read with a transport error, the restore with a lost
+        // register. The restore wins, because it is the one saying later reads cannot
+        // be trusted, and a plain `Timeout` here would invite the retry that sticks.
+        let board = failing(0b0011_0101, 1, 26);
+
+        let err = board.self_test().unwrap_err();
+
+        assert!(matches!(err, Error::RegisterOutOfSync { .. }));
+    }
+
+    #[test]
+    fn a_self_test_cut_short_still_puts_the_register_back() {
+        // The first read lands and the second does not, so the original contents are
+        // still known and the restore can run.
+        let board = failing(0b0011_0101, 1, usize::MAX);
+
+        let err = board.self_test().unwrap_err();
+
+        // A transport error rather than a lost register, because the restore had the
+        // original to hand.
+        assert!(matches!(err, Error::Usb(_)));
+        assert_eq!(board.gpio.gpio.register.get(), 0b0011_0101);
+        assert_eq!(board.gpio.gpio.outputs.get(), 0b0011_0101);
     }
 
     #[test]

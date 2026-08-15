@@ -68,4 +68,43 @@ pub enum Error {
     /// [`Error::VerificationFailed`], which leaves their physical state unknown.
     #[error("self-test failed")]
     SelfTestFailed,
+
+    /// A read left the shift register no longer holding what the relays hold.
+    ///
+    /// Reading the A6275 is destructive, since zeros shift in as the contents shift
+    /// out, so every read writes back what it read. This is that round trip coming
+    /// apart: either the read itself failed, taking contents with it that nothing
+    /// can recover, or the write back did.
+    ///
+    /// The failure moves no relay of its own: it is the register that is lost, not
+    /// the outputs. After [`relays`](crate::Board::relays) or
+    /// [`self_test`](crate::Board::self_test) the relays hold whatever they already
+    /// held; after [`set_relays`](crate::Board::set_relays) they hold the value that
+    /// was latched, which is the one the restore was trying to put back.
+    ///
+    /// What is lost is the board's *account* of them, and that account is what later
+    /// reads report: a following `relays` can succeed and report relays as inactive
+    /// while they are physically energized. Retrying the read is therefore the one
+    /// thing that does not help.
+    ///
+    /// `set_relays` is the way out: it latches what it writes and leaves the register
+    /// holding it, so the two agree again.
+    #[error("the shift register is out of sync with the relays: {source}")]
+    RegisterOutOfSync {
+        /// The transport failure that interrupted the read or the write back.
+        source: Box<Error>,
+    },
+}
+
+impl Error {
+    /// Reports `source` as having left the shift register out of sync.
+    ///
+    /// Conservative on purpose: a stream that failed on its way out may never have
+    /// clocked the register, but nothing can tell that from a response that was
+    /// lost, and assuming the contents survived is the assumption that lies.
+    pub(crate) fn out_of_sync(source: Error) -> Self {
+        Error::RegisterOutOfSync {
+            source: Box::new(source),
+        }
+    }
 }

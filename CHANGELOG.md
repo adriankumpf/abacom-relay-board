@@ -138,6 +138,13 @@ Code holding raw masks converts at the boundary with `Relays::from_bits(u8)` and
   value the caller actually asked for, so reach for `self_test()` at startup,
   from a health check, or when a board is suspect
 - `Error::InvalidRelay` for relay numbers outside 1–8
+- `Error::RegisterOutOfSync`, for a read that could not put the shift register
+  back. Reading the A6275 is destructive, so every read writes back what it read;
+  when that round trip is interrupted the register no longer holds what the relays
+  hold, and it is the register that later reads report. The failure moves no relay
+  of its own, but a following `relays()` can succeed and report relays as inactive
+  while they are energized, so retrying the read is the one remedy that does not
+  work. Write a known state with `set_relays` instead
 
 ### Fixed
 
@@ -151,6 +158,15 @@ Code holding raw masks converts at the boundary with `Relays::from_bits(u8)` and
   read shifted in — so a failure made the *next* read disagree with the latched
   outputs, on exactly the board already suspected of misreporting. No relay moved
   either way
+- Restore the shift register when a *transfer* fails too, not only when a check
+  does. A USB error between the read and the write that puts it back left the
+  register holding zeros while the outputs held relays, and the documented remedy
+  for a transient error is to retry: the retried read then succeeded and reported
+  "none active" on an energized board. Every destructive read now restores on its
+  way out whatever it returns, and where the contents are genuinely gone (the read
+  itself failed, so there is nothing to put back) the caller is told so with
+  `Error::RegisterOutOfSync` rather than being handed a transport error that
+  invites exactly that retry
 - Discard a stale UIO stream response after a clocked read fails. The device
   queues the stream's answer as the stream runs, so a read that timed out left
   eight bytes in the IN endpoint that nothing consumed, and the next read took
