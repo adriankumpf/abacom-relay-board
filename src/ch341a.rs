@@ -63,6 +63,13 @@ const STATES_PER_SAMPLE: usize = 3;
 /// for.
 const MAX_SAMPLES: usize = (PACKET_LENGTH - 4) / STATES_PER_SAMPLE;
 
+/// How many readings one clocked read takes.
+///
+/// The fixed width of this driver's only clocked read. What makes eight the right
+/// number belongs to the device being clocked, so [`A6275`](crate::a6275::A6275)
+/// asserts it against the register it folds these samples into.
+pub const SAMPLES: usize = 8;
+
 pub type Device = rusb::Device<rusb::Context>;
 type DeviceHandle = rusb::DeviceHandle<rusb::Context>;
 
@@ -121,12 +128,12 @@ pub trait Gpio {
     /// this one's.
     fn set_output(&self, data: u8) -> Result<()>;
 
-    /// Takes `N` readings of the D0–D7 input lines, one per pulse of `clock`.
+    /// Takes [`SAMPLES`] readings of the D0–D7 input lines, one per pulse of `clock`.
     ///
     /// Each reading is taken before `clock` goes high, so a device that shifts on
     /// the rising edge is sampled once per bit, first bit first. Every line other
     /// than `clock` is held low throughout, and all of them are left low.
-    fn sample_clocked<const N: usize>(&self, clock: u8) -> Result<[u8; N]>;
+    fn sample_clocked(&self, clock: u8) -> Result<[u8; SAMPLES]>;
 }
 
 /// An opened CH341A with its bulk interface claimed.
@@ -193,14 +200,14 @@ impl Gpio for Ch341a {
         self.write(&msg)
     }
 
-    fn sample_clocked<const N: usize>(&self, clock: u8) -> Result<[u8; N]> {
-        const { assert!(N <= MAX_SAMPLES, "a UIO stream must fit one packet") };
+    fn sample_clocked(&self, clock: u8) -> Result<[u8; SAMPLES]> {
+        const { assert!(SAMPLES <= MAX_SAMPLES, "a UIO stream must fit one packet") };
 
-        let (packet, len) = sample_stream(clock, N);
+        let (packet, len) = sample_stream(clock, SAMPLES);
         self.write(&packet[..len])?;
 
         // One byte per `UIO_STM_IN`, in the order the stream ran them.
-        let mut samples = [0u8; N];
+        let mut samples = [0u8; SAMPLES];
         self.read(&mut samples)?;
 
         Ok(samples)

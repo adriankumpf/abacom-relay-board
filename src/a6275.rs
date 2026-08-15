@@ -10,7 +10,7 @@
 //! instead of hardware.
 
 use crate::Verify;
-use crate::ch341a::Gpio;
+use crate::ch341a::{Gpio, SAMPLES};
 use crate::errors::{Error, Result};
 use crate::relays::Relays;
 
@@ -54,10 +54,14 @@ impl<T: Gpio> A6275<T> {
     /// Destructive: reading shifts zeros in, so the caller must restore the register
     /// with [`A6275::shift_out_bits`] if its contents still matter.
     fn read_shift_register(&self) -> Result<u8> {
+        // What ties the wire layer's sample count to this register: one sample per
+        // bit, folded into the `u8` below, which a wider read would silently truncate.
+        const { assert!(SAMPLES == u8::BITS as usize, "the register is one byte") };
+
         let mut status = 0;
 
         // The register presents its most significant bit first.
-        for sample in self.gpio.sample_clocked::<8>(CLK)? {
+        for sample in self.gpio.sample_clocked(CLK)? {
             status = status << 1 | u8::from(sample & READ != 0);
         }
 
@@ -160,8 +164,8 @@ mod tests {
         /// Drives the sampling one state at a time, exactly as the pin states a
         /// UIO stream runs would: batching it on the wire must not change what the
         /// device sees.
-        fn sample_clocked<const N: usize>(&self, clock: u8) -> Result<[u8; N]> {
-            let mut samples = [0; N];
+        fn sample_clocked(&self, clock: u8) -> Result<[u8; SAMPLES]> {
+            let mut samples = [0; SAMPLES];
 
             self.set_output(0)?;
 
@@ -186,8 +190,8 @@ mod tests {
             Ok(())
         }
 
-        fn sample_clocked<const N: usize>(&self, _clock: u8) -> Result<[u8; N]> {
-            Ok([0; N])
+        fn sample_clocked(&self, _clock: u8) -> Result<[u8; SAMPLES]> {
+            Ok([0; SAMPLES])
         }
     }
 
@@ -202,7 +206,7 @@ mod tests {
             self.0.set_output(data)
         }
 
-        fn sample_clocked<const N: usize>(&self, clock: u8) -> Result<[u8; N]> {
+        fn sample_clocked(&self, clock: u8) -> Result<[u8; SAMPLES]> {
             let mut samples = self.0.sample_clocked(clock)?;
 
             if let Some(first) = samples.first_mut() {
@@ -227,7 +231,7 @@ mod tests {
             self.gpio.set_output(data)
         }
 
-        fn sample_clocked<const N: usize>(&self, clock: u8) -> Result<[u8; N]> {
+        fn sample_clocked(&self, clock: u8) -> Result<[u8; SAMPLES]> {
             self.transfers.set(self.transfers.get() + 2);
 
             self.gpio.sample_clocked(clock)
