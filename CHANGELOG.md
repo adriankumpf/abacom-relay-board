@@ -151,6 +151,13 @@ Code holding raw masks converts at the boundary with `Relays::from_bits(u8)` and
   read shifted in — so a failure made the *next* read disagree with the latched
   outputs, on exactly the board already suspected of misreporting. No relay moved
   either way
+- Discard a stale UIO stream response after a clocked read fails. The device
+  queues the stream's answer as the stream runs, so a read that timed out left
+  eight bytes in the IN endpoint that nothing consumed, and the next read took
+  them for its own: from then on every read reported the register as of one call
+  earlier, spuriously failing verification, and the lengths matched so the
+  transfer-length check could not see it. The endpoint is now drained on that
+  error path
 - Correct three pieces of documentation that would send a consumer's recovery the
   wrong way: `Error::MultipleFound` said it meant no port was given, when a port
   that two hubs both have a board on produces it as well (and supplying the port

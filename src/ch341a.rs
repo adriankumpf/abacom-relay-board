@@ -35,6 +35,16 @@ const INTERFACE: u8 = 0;
 /// strategy anyway".
 const TIMEOUT_WRITE: Duration = Duration::from_millis(1000);
 const TIMEOUT_READ: Duration = Duration::from_millis(1000);
+/// Deadline for the best-effort drain that follows a failed clocked read.
+///
+/// Short, unlike the two above: whatever the device queued is either there
+/// already or was never produced, and this is paid by a call that has failed
+/// anyway.
+const TIMEOUT_DRAIN: Duration = Duration::from_millis(50);
+
+/// How many packets a drain discards before giving up, so that a device
+/// answering endlessly cannot hold an error path open.
+const DRAIN_PACKETS: usize = 4;
 
 // The UIO stream command and the states that may appear in one. A stream is
 // `CMD_UIO_STREAM`, a sequence of states and `UIO_STM_END`, all in a single
@@ -188,6 +198,38 @@ impl Ch341a {
 
         expect_transfer_len(read, buf.len())
     }
+
+    /// Discards whatever the device still has queued on the IN endpoint.
+    ///
+    /// A UIO stream's response is queued as the stream runs, so a read that never
+    /// completed leaves those bytes in the endpoint. Nothing else consumes them and
+    /// the next read takes them for its own: from then on every clocked read answers
+    /// with the samples of the call before it. The lengths match, so
+    /// [`expect_transfer_len`] cannot catch it, and the board keeps reporting a state
+    /// it held one call ago until it is reset.
+    ///
+    /// Either half of the round trip can leave it that way, which is why both drain:
+    /// a write that reports the wrong length still put a truncated stream on the
+    /// wire, and the states it did run queued their bytes.
+    ///
+    /// Best effort, on a path that is already failing, so its own errors say nothing
+    /// the caller does not know. Draining *before* a read instead would pay
+    /// [`TIMEOUT_DRAIN`] on every call to find the endpoint empty. Not yet measured
+    /// against real hardware: a process killed between its write and its read leaves
+    /// the endpoint dirty either way, and only [`Ch341a::reset`] clears that.
+    fn drain(&self) {
+        let mut discard = [0u8; PACKET_LENGTH];
+
+        for _ in 0..DRAIN_PACKETS {
+            match self
+                .handle
+                .read_bulk(ENDPOINT_IN, &mut discard, TIMEOUT_DRAIN)
+            {
+                Ok(1..) => continue,
+                _ => break,
+            }
+        }
+    }
 }
 
 impl Gpio for Ch341a {
@@ -204,11 +246,15 @@ impl Gpio for Ch341a {
         const { assert!(SAMPLES <= MAX_SAMPLES, "a UIO stream must fit one packet") };
 
         let (packet, len) = sample_stream(clock, SAMPLES);
-        self.write(&packet[..len])?;
 
-        // One byte per `UIO_STM_IN`, in the order the stream ran them.
+        // One byte per `UIO_STM_IN`, in the order the stream ran them. If either
+        // half of that round trip fails, whatever the device queued goes in the bin
+        // rather than to the next read.
         let mut samples = [0u8; SAMPLES];
-        self.read(&mut samples)?;
+
+        self.write(&packet[..len])
+            .and_then(|()| self.read(&mut samples))
+            .inspect_err(|_| self.drain())?;
 
         Ok(samples)
     }
