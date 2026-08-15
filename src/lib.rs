@@ -27,8 +27,8 @@
 //! Within a running system the addressing is stable: a port number is physical, so
 //! it survives the re-enumeration a [`Board::reset_device`] causes, where a USB
 //! device address would not. [`Usb::boards`] enumerates in a stable order, and
-//! `arb --list` prints each board in the same `1-1.3` notation `lsusb -t` uses, so
-//! the two can be read side by side.
+//! `arb --list` prints each board as `port 3 (1-1.3)`, carrying the same `1-1.3`
+//! notation `lsusb -t` uses, so the two can be read side by side.
 //!
 //! # Examples
 //!
@@ -235,8 +235,10 @@ impl Board {
     /// # Errors
     ///
     /// * [`Error::NotFound`] — no relay board detected
-    /// * [`Error::MultipleFound`] — multiple boards detected and no port was given
+    /// * [`Error::MultipleFound`] — more than one board answers to this one
     /// * [`Error::Busy`] — another application is talking to the board
+    /// * [`Error::RegisterOutOfSync`] — the read was interrupted, or the write that
+    ///   puts back what it consumed was, so reading again is not the remedy
     ///
     /// # Example
     ///
@@ -253,18 +255,22 @@ impl Board {
         A6275::new(self.claim()?).status().map(Relays::from_bits)
     }
 
-    /// Checks that the board answers correctly, without moving any relay.
+    /// Checks that the board answers correctly, without moving any relay, and
+    /// returns the relays it found active.
     ///
     /// Writes an inverted test pattern to the shift register and reads it back. The
     /// pattern is never latched and the register's original contents are put back
-    /// afterwards, so this is safe to call on a board driving live outputs.
+    /// afterwards, so this is safe to call on a board driving live outputs. Those
+    /// contents are what it returns: the check has to read them before it can write
+    /// anything, so a caller that wants both a verdict and a state gets them from
+    /// one claim rather than following this with [`relays`](Board::relays).
     ///
     /// A diagnostic, not a guard on the operating path. [`Board::set_relays`] with
     /// [`Verify::Enabled`] already writes, latches, reads back and compares within
     /// a single claim — that covers everything this covers, on the value the caller
     /// actually asked for, plus the latch this deliberately never touches. And
-    /// because a `self_test` is its own claim, it vouches for no particular
-    /// [`relays`](Board::relays) call before or after it.
+    /// because a `self_test` is its own claim, it vouches for no other
+    /// [`relays`](Board::relays) call, only for the state it hands back itself.
     ///
     /// So reach for it where a person or a monitor is asking "is this board still
     /// healthy?" — at startup, from a health check, or when a board is suspect —
@@ -278,11 +284,13 @@ impl Board {
     /// # Errors
     ///
     /// * [`Error::NotFound`] — no relay board detected
-    /// * [`Error::MultipleFound`] — multiple boards detected and no port was given
+    /// * [`Error::MultipleFound`] — more than one board answers to this one
     /// * [`Error::Busy`] — another application is talking to the board
     /// * [`Error::SelfTestFailed`] — the test pattern did not survive the round trip
-    pub fn self_test(&self) -> Result<()> {
-        A6275::new(self.claim()?).self_test()
+    /// * [`Error::RegisterOutOfSync`] — the check was interrupted and could not put
+    ///   the register's contents back
+    pub fn self_test(&self) -> Result<Relays> {
+        A6275::new(self.claim()?).self_test().map(Relays::from_bits)
     }
 
     /// Activates `relays`, deactivating every relay not in the set.
@@ -296,9 +304,11 @@ impl Board {
     /// # Errors
     ///
     /// * [`Error::NotFound`] — no relay board detected
-    /// * [`Error::MultipleFound`] — multiple boards detected and no port was given
+    /// * [`Error::MultipleFound`] — more than one board answers to this one
     /// * [`Error::Busy`] — another application is talking to the board
     /// * [`Error::VerificationFailed`] — the read-back did not match `relays`
+    /// * [`Error::RegisterOutOfSync`] — the read-back was interrupted and could not
+    ///   put the latched value back into the register
     ///
     /// # Example
     ///
@@ -323,7 +333,7 @@ impl Board {
     /// # Errors
     ///
     /// * [`Error::NotFound`] — no relay board detected
-    /// * [`Error::MultipleFound`] — multiple boards detected and no port was given
+    /// * [`Error::MultipleFound`] — more than one board answers to this one
     /// * [`Error::Busy`] — another application is talking to the board
     pub fn reset_device(&self) -> Result<()> {
         self.claim()?.reset()
@@ -335,9 +345,9 @@ impl Board {
     }
 }
 
-/// Names which board this is: `port 3 (bus 1, path 1.3)` for one from
-/// [`Usb::boards`], which tells apart two boards sharing a port number, `port 3` for
-/// `usb.board(Some(3))`, and `any board` for `usb.board(None)`.
+/// Names which board this is: `port 3 (1-1.3)` for one from [`Usb::boards`], which
+/// tells apart two boards sharing a port number, `port 3` for `usb.board(Some(3))`,
+/// and `any board` for `usb.board(None)`.
 impl fmt::Display for Board {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.select.fmt(f)

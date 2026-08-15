@@ -20,7 +20,13 @@ pub enum Error {
     #[error("no relay board found")]
     NotFound,
 
-    /// Multiple relay boards were found and no port was specified to disambiguate.
+    /// More than one board answered to the one that was named.
+    ///
+    /// Either no port was given and several boards are attached, or a port *was*
+    /// given and two boards share it: a port number is the port on the parent hub,
+    /// so two hubs can both have a board on port 3. Giving the port again is no
+    /// remedy in that second case: [`Usb::boards`](crate::Usb::boards) names each
+    /// board by its whole path, which cannot collide.
     #[error("multiple relay boards found")]
     MultipleFound,
 
@@ -36,8 +42,16 @@ pub enum Error {
 
     /// The relay state read back after `set_relays` did not match the requested state.
     ///
-    /// The relays were latched before the read-back, so the physical relay state is
-    /// unknown: `expected`, `actual` or neither. Read the board back to find out.
+    /// The relays were latched before the read-back, so their physical state is
+    /// unknown: `expected`, `actual` or neither. Reading the board again does not
+    /// settle it, because the A6275 hands back its shift register rather than its
+    /// outputs, and the register is left holding `expected`: the value that was
+    /// latched, and the one a read puts back.
+    ///
+    /// What a read can separate is which half is at fault:
+    /// [`self_test`](crate::Board::self_test) exercises the read path on its own,
+    /// without latching, so a board that then fails it was misreporting rather than
+    /// misdriving. Either way the way back to a known state is to write it again.
     #[error("verification failed: expected {expected}, read back {actual}")]
     VerificationFailed {
         /// The relays that were requested.
@@ -62,4 +76,43 @@ pub enum Error {
     /// [`Error::VerificationFailed`], which leaves their physical state unknown.
     #[error("self-test failed")]
     SelfTestFailed,
+
+    /// A read left the shift register no longer holding what the relays hold.
+    ///
+    /// Reading the A6275 is destructive, since zeros shift in as the contents shift
+    /// out, so every read writes back what it read. This is that round trip coming
+    /// apart: either the read itself failed, taking contents with it that nothing
+    /// can recover, or the write back did.
+    ///
+    /// The failure moves no relay of its own: it is the register that is lost, not
+    /// the outputs. After [`relays`](crate::Board::relays) or
+    /// [`self_test`](crate::Board::self_test) the relays hold whatever they already
+    /// held; after [`set_relays`](crate::Board::set_relays) they hold the value that
+    /// was latched, which is the one the restore was trying to put back.
+    ///
+    /// What is lost is the board's *account* of them, and that account is what later
+    /// reads report: a following `relays` can succeed and report relays as inactive
+    /// while they are physically energized. Retrying the read is therefore the one
+    /// thing that does not help.
+    ///
+    /// `set_relays` is the way out: it latches what it writes and leaves the register
+    /// holding it, so the two agree again.
+    #[error("the shift register is out of sync with the relays: {source}")]
+    RegisterOutOfSync {
+        /// The transport failure that interrupted the read or the write back.
+        source: Box<Error>,
+    },
+}
+
+impl Error {
+    /// Reports `source` as having left the shift register out of sync.
+    ///
+    /// Conservative on purpose: a stream that failed on its way out may never have
+    /// clocked the register, but nothing can tell that from a response that was
+    /// lost, and assuming the contents survived is the assumption that lies.
+    pub(crate) fn out_of_sync(source: Error) -> Self {
+        Error::RegisterOutOfSync {
+            source: Box::new(source),
+        }
+    }
 }

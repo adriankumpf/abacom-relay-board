@@ -2,15 +2,17 @@
 
 ## [Unreleased]
 
+A new public API. The three free functions become methods on two types, relays
+are named instead of masked, and a caller that keeps one `Usb` around pays
+libusb's start-up cost once rather than on every call.
+
 ### Migrating from 0.7.1
 
-Every 0.7.1 entry point is gone: the three free functions are methods on two new
-types, and relays are named rather than masked. Build one `Usb` and keep it —
-that is where the release's headline saving lives.
-
 ```rust
-let usb = arb::Usb::new()?;  // expensive; do this once
-let board = usb.board(port);
+use arb::{Relay, Relays, Usb, Verify};
+
+let usb = Usb::new()?;        // expensive: build one and keep it
+let board = usb.board(port);  // free: finds and claims the board per call
 
 board.set_relays(Relay::One | Relay::Three, Verify::Enabled)?;
 let active = board.relays()?;
@@ -19,34 +21,66 @@ board.reset_device()?;
 
 | 0.7.1                                  | 0.8.0                                                             |
 | -------------------------------------- | ----------------------------------------------------------------- |
-| `arb::get_status(port)?` → `u8`        | `usb.board(port).relays()?` → `Relays` — **no longer self-tests** |
+| `arb::get_status(port)?` → `u8`        | `usb.board(port).relays()?` → `Relays` (no longer self-tests)     |
 | `arb::set_status(bits, verify, port)?` | `usb.board(port).set_relays(relays, Verify::Enabled)?`            |
 | `arb::reset(port)?`                    | `usb.board(port).reset_device()?`                                 |
 | `arb::Result`                          | `arb::Result<()>`                                                 |
 | `Error::BadDevice`                     | `Error::SelfTestFailed`                                           |
 | `Error::Usb(rusb::Error::Busy)`        | `Error::Busy`                                                     |
-| `Error::IO`                            | gone — the CLI owns its I/O errors                                |
-| —                                      | `match` on `Error` needs a wildcard arm (`#[non_exhaustive]`)     |
+| `Error::IO`                            | gone: the CLI owns its I/O errors                                 |
+| `match` on `Error`                     | needs a wildcard arm (`#[non_exhaustive]`)                        |
 
 Code holding raw masks converts at the boundary with `Relays::from_bits(u8)` and
 `Relays::bits()`. Code building sets is better served by `Relay::try_from(n)?`,
 `Relay::One | Relay::Three`, or `collect()` from an iterator of `Relay`;
 `Relays::iter()` is the way back out.
 
+### Added
+
+- `Relay` and `Relays`, the types that replace the raw mask. `Relays` is a `Copy`
+  set with `NONE`/`ALL`, `insert`/`remove`/`contains`, `|` and `|=` over both
+  `Relay` and `Relays`, `FromIterator`/`IntoIterator`, and a `Display` that
+  renders `1 3 8`. `Relay::try_from(u8)` validates a relay number and
+  `Relay::ALL` names all eight
+- `Usb::boards()`, which returns every attached board in a stable order. There
+  was previously no way to enumerate, and a host with four boards is a real
+  configuration. An enumerated board is identified by where it sits on the USB
+  tree rather than by port number, which is only unique among one hub's ports, so
+  it always resolves back to the board it came from. An empty list means no board
+  is attached rather than `Error::NotFound`
+- `Board::port()` and `Display for Board`, which renders an enumerated board as
+  `port 3 (1-1.3)`. These boards carry no serial number and no product strings,
+  so where a board is plugged in is the only thing that tells two of them apart.
+  The notation is the one `lsusb -t` uses, so `arb --list` can be read beside it
+- `arb --list`, one line per attached board. Prints nothing when there is none,
+  so the output stays readable line by line
+- `Board::self_test()`, the read-back check that reading used to perform on the
+  way past. It latches nothing, so it is safe to call on a live board, and it
+  returns the `Relays` it found while checking: a caller wanting both a verdict
+  and a state gets them from one claim, which is what `arb --status` now does.
+  Reach for it at startup, from a health check, or when a board is suspect, not
+  on the path of ordinary reads: `set_relays` with `Verify::Enabled` already
+  checks the value the caller actually asked for
+- `Error::InvalidRelay`, for relay numbers outside 1–8
+- `Error::RegisterOutOfSync`, for a read that could not put the shift register
+  back (see *Fixed*). It moves no relay of its own, but a later `relays()` can
+  succeed and report relays as inactive while they are energized, so retrying the
+  read is the one remedy that does not work. Write a known state with
+  `set_relays` instead
+- Package metadata for publishing, and a declared minimum Rust version of 1.85
+
 ### Changed (**breaking**)
 
 - Replace the three free functions with two types: `Usb`, a libusb context, and
   `Board`, one relay board found through it. Each free function created its own
-  context, and `libusb_init` was 99% of the cost of a call — 6.5 ms of a 6.6 ms
-  open. A caller that keeps one `Usb` now pays that once instead of per call,
-  leaving ~50 µs of per-call overhead. `Usb` is cheap to clone and `Send + Sync`,
-  so one context can serve every thread. `Board` is free to build, resolves
-  nothing until a method is called, and — as before — claims the USB interface
-  only for the duration of one call, so it never locks another application out of
-  a shared board. Note that a reused context no longer self-heals: no error
-  reliably says a context has gone sour, so rather than trying to classify one,
-  drop the `Usb` and build a new one after *any* failed operation — it costs
-  ~6.5 ms and failures are rare
+  context, and `libusb_init` was 6.5 ms of the 6.6 ms that cost. A caller that
+  keeps one `Usb` pays it once instead of per call, leaving ~50 µs of per-call
+  overhead. `Usb` is cheap to clone and `Send + Sync`, so one context serves every
+  thread. `Board` is free to build and, as before, claims the USB interface only
+  for the duration of one call, so it never locks another application out of a
+  shared board. One caveat: a reused context does not self-heal, and no error
+  reliably says a context has gone sour, so drop the `Usb` and build a new one
+  after *any* failed operation
 - Rename the free functions to `Board::relays`, `Board::set_relays` and
   `Board::reset_device`. `reset(port)` in particular read like "turn all the
   relays off"; it is a USB reset and leaves the relay outputs untouched
@@ -57,33 +91,25 @@ Code holding raw masks converts at the boundary with `Relays::from_bits(u8)` and
 - Replace `set_relays`' `verify: bool` parameter with a `Verify` enum.
   `Verify::Enabled` is its `Default`, so verification stays the safe option a
   caller gets without asking
-- Mark `Error` as `#[non_exhaustive]`, so that future variants can be added
-  without another breaking release. Downstream `match`es need a wildcard arm
+- Make `Board::relays()` a plain read. It used to perform a hidden
+  read-modify-write (an inverted test pattern written to the shift register, read
+  back and undone) that doubled its cost without being mentioned by its name. A
+  read now costs 28 USB transfers rather than 56, roughly 1.1 ms instead of
+  2.3 ms. **Callers that relied on reading to vet the board must call
+  `self_test()` themselves**; `arb --status` does
+- Report a board held by another application as `Error::Busy` rather than as
+  `Error::Usb(rusb::Error::Busy)`, which made it indistinguishable from a real USB
+  fault even though it is a normal and retryable condition on a shared board. A
+  `match` arm on the old shape stops firing
+- Rename `Error::BadDevice` to `Error::SelfTestFailed`. The two read-back failures
+  stay distinct because the recovery differs: `SelfTestFailed` writes its test
+  pattern without latching, so the relays were never touched, whereas
+  `VerificationFailed` latched first and leaves their physical state unknown
 - Give `Error::VerificationFailed` `expected` and `actual` fields, both `Relays`.
   It previously carried nothing, so a caller was told the read-back disagreed but
   not how
-- Rename `Error::BadDevice` to `Error::SelfTestFailed`, and correct its
-  documentation, which still described an "empty read" — that became
-  `Error::UnexpectedTransferLength` in 0.7.1. The two read-back failures stay
-  distinct because the recovery differs: `SelfTestFailed` writes its test pattern
-  without latching, so the relays were never touched, whereas
-  `VerificationFailed` latched first and leaves their physical state unknown
-- Report a board held by another application as the new `Error::Busy` rather than
-  as `Error::Usb(rusb::Error::Busy)`, which made it indistinguishable from a real
-  USB fault even though it is a normal and retryable condition on a shared board.
-  Breaking for callers: a `match` arm on `Error::Usb(rusb::Error::Busy)` stops
-  firing
-- Split the board's self-test out of `Board::relays`, which is now a plain read.
-  Reading performed a hidden read-modify-write — an inverted test pattern written
-  to the shift register, read back and undone — that doubled its cost and was not
-  mentioned by its name. The check is now `Board::self_test()`, and a read costs
-  28 transfers rather than 56 — roughly 2.3 ms to 1.1 ms. **Callers that relied
-  on reading to vet the board must call `self_test()` themselves**;
-  `arb --status` still does
-- Render `Relays::NONE` as `none` rather than as the empty string. `Display` is
-  what error messages and `arb --status` interpolate, and an empty set previously
-  rendered as nothing at all — `Active relays: ` — which reads as a bug rather
-  than as "no relays"
+- Mark `Error` as `#[non_exhaustive]`, so that future variants can be added
+  without another breaking release. Downstream `match`es need a wildcard arm
 
 ### Removed (**breaking**)
 
@@ -99,64 +125,43 @@ Code holding raw masks converts at the boundary with `Relays::from_bits(u8)` and
 ### Changed
 
 - Read the shift register in a single CH341A UIO stream instead of one USB
-  transfer per line change — one packet of pin states out, one packet of samples
-  back, 2 transfers rather than 33. That takes `set_relays` with
-  `Verify::Enabled` from 87 transfers to 56 and `Board::self_test()` from 118 to
-  56: roughly 3.6 ms to 2.3 ms and 4.8 ms to 2.3 ms at the measured ~41 µs per
-  transfer. The write path is deliberately left alone, because the CH341A drives
-  a batched write faster than the DATA line settles
-- Print CLI errors as `arb: <message>` on stderr — `arb: no relay board found`
+  transfer per line change: one packet of pin states out, one packet of samples
+  back, 2 transfers rather than 33. That takes `set_relays` with `Verify::Enabled`
+  from 87 transfers to 56 and `self_test()` from 118 to 56, roughly 3.6 ms to
+  2.3 ms and 4.8 ms to 2.3 ms at the measured ~41 µs per transfer. The write path
+  is deliberately left alone, because the CH341A drives a batched write faster
+  than the DATA line settles
+- Print CLI errors as `arb: <message>` on stderr, so `arb: no relay board found`
   where it previously said `Error: NotFound`. Exit codes are unchanged
-
-### Added
-
-- `Relay`, `Relays` and `RelayIter`, the types that replace the raw mask.
-  `Relays` is a `Copy` set with `NONE`/`ALL`, `insert`/`remove`/`contains`, `|`
-  and `|=` over both `Relay` and `Relays`, `FromIterator`/`IntoIterator`, and a
-  `Display` that renders `1 3 8`. `Relay::try_from(u8)` validates a relay number
-  and `Relay::ALL` names all eight
-- `Usb::boards()`, which returns every attached board in a stable order — there
-  was previously no way to enumerate, and a host with four boards is a real
-  configuration. An enumerated board is identified by where it sits on the USB
-  tree rather than by port number, which is only unique among one hub's ports, so
-  it always resolves back to the board it came from. `usb.board(Some(3))` still
-  matches on port alone, exactly as before, with `MultipleFound` the answer to a
-  collision and `boards()` the way out. An empty list means no board is attached
-  rather than `Error::NotFound`
-- `Board::port()`, so a caller can label the board it got, and `Display for
-  Board`, which renders an enumerated board as `port 3 (1-1.3)` — enough to tell
-  apart two boards that share a port number. The notation is the one `lsusb -t`
-  uses, so `arb --list` can be read beside it: these boards carry no serial
-  number and no product strings, so where a board is plugged in is the only
-  thing that distinguishes two of them
-- `arb --list`, which prints one line per attached board. Prints nothing when
-  there is none, so the output stays readable line by line
-- `Board::self_test()`, the read-back check that `Board::relays` used to perform
-  on the way past. It moves no relay, so it is safe to call on a live board.
-  A diagnostic rather than a guard on the operating path: `set_relays` with
-  `Verify::Enabled` already covers the same ground inside one claim, and on the
-  value the caller actually asked for, so reach for `self_test()` at startup,
-  from a health check, or when a board is suspect
-- `Error::InvalidRelay` for relay numbers outside 1–8
+- Render the empty relay set as `none`. `arb --status` previously printed
+  `Active relays: ` with nothing after it, which reads as a bug rather than as
+  "no relays"
 
 ### Fixed
 
-- Stop discarding the shift register restore when reading. Reading the A6275
-  clocks zeros in, so the read primitive repaired the register afterwards — and
-  the caller then overwrote that repair immediately, wasting ~31% of the USB
-  traffic a read cost. No `LATCH` is asserted in any of the removed writes, so no
-  relay could ever have moved
-- Restore the shift register when a self-test fails. The check returned on
-  mismatch before putting the register back, leaving it holding the zeros the
-  read shifted in — so a failure made the *next* read disagree with the latched
-  outputs, on exactly the board already suspected of misreporting. No relay moved
-  either way
-- Correct a wrong relay bitmask in a documentation example
+- Put the shift register back on every path out of a read, failures included.
+  Reading the A6275 clocks zeros in, so every read writes back what it read; a USB
+  error between the two left the register holding zeros while the outputs held
+  relays. The documented remedy for a transient error is to retry, and the retried
+  read then succeeded and reported "none active" on an energized board. Where the
+  contents are genuinely gone the caller now gets `Error::RegisterOutOfSync`
+  instead of a transport error that invites exactly that retry
+- Restore the shift register when a self-test fails, instead of leaving it holding
+  the value that was read back. A failure made the *next* read disagree with the
+  latched outputs, on exactly the board already suspected of misreporting. No
+  relay moved either way
+- Put the *latched* value back into the shift register after a failed
+  verification, rather than the value that was read back. The read path is the one
+  a mismatch implicates, so leaving its answer in the register made the next read
+  agree with the fault instead of with the relays. Reading a board back cannot
+  settle what a mismatch left behind either way: the A6275 hands back its shift
+  register, not its outputs, and `Error::VerificationFailed` said otherwise
 - Raise the USB bulk timeouts to 1000 ms, from 10 ms for reads and 100 ms for
   writes. Ten milliseconds for a USB round trip is tight enough to fail
   spuriously on a loaded host or through a hub, and nothing retries behind it
 - Re-attach the kernel driver when the interface is released. The driver was
   previously detached on open and never restored
+- Correct a wrong relay bitmask in a documentation example
 
 ## [0.7.1] - 2026-04-02
 

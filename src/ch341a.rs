@@ -5,7 +5,7 @@
 //! - `ENDPOINT_IN` (0x82): device-to-host responses
 //!
 //! Two commands are used:
-//! - `0xA1` (set output): sets the state of the D0–D7 GPIO lines, one transfer per
+//! - `0xA1` (set output): sets the state of the D0–D5 GPIO lines, one transfer per
 //!   line change
 //! - `0xAB` (UIO stream): runs a short program of pin states, so that reading a
 //!   whole shift register — sample, clock, sample, … — costs one transfer out and
@@ -35,6 +35,16 @@ const INTERFACE: u8 = 0;
 /// strategy anyway".
 const TIMEOUT_WRITE: Duration = Duration::from_millis(1000);
 const TIMEOUT_READ: Duration = Duration::from_millis(1000);
+/// Deadline for the best-effort drain that follows a failed clocked read.
+///
+/// Short, unlike the two above: whatever the device queued is either there
+/// already or was never produced, and this is paid by a call that has failed
+/// anyway.
+const TIMEOUT_DRAIN: Duration = Duration::from_millis(50);
+
+/// How many packets a drain discards before giving up, so that a device
+/// answering endlessly cannot hold an error path open.
+const DRAIN_PACKETS: usize = 4;
 
 // The UIO stream command and the states that may appear in one. A stream is
 // `CMD_UIO_STREAM`, a sequence of states and `UIO_STM_END`, all in a single
@@ -62,6 +72,13 @@ const STATES_PER_SAMPLE: usize = 3;
 /// command, the two states that open the stream and the terminator are accounted
 /// for.
 const MAX_SAMPLES: usize = (PACKET_LENGTH - 4) / STATES_PER_SAMPLE;
+
+/// How many readings one clocked read takes.
+///
+/// The fixed width of this driver's only clocked read. What makes eight the right
+/// number belongs to the device being clocked, so [`A6275`](crate::a6275::A6275)
+/// asserts it against the register it folds these samples into.
+pub const SAMPLES: usize = 8;
 
 pub type Device = rusb::Device<rusb::Context>;
 type DeviceHandle = rusb::DeviceHandle<rusb::Context>;
@@ -114,23 +131,19 @@ pub fn is_ch341a(device: &Device) -> Result<bool> {
 /// so keeping it behind a trait lets the shift register protocol be exercised
 /// against a simulated A6275 instead of real hardware.
 pub trait Gpio {
-    /// Sets the D0–D7 output lines to `data`.
+    /// Sets the output lines to `data`, one line per bit.
     ///
-    /// Each bit in `data` corresponds to one GPIO line. On the ABACOM relay board:
-    /// - Bit 0 (0x01): A6275 LATCH
-    /// - Bit 3 (0x08): A6275 CLK
-    /// - Bit 5 (0x20): A6275 Serial DATA in
+    /// Only D0–D5 are driven (see [`OUTPUT_LINES`]), so bits 6 and 7 of `data`
+    /// change nothing. Which line does what is the protocol layer's business, not
+    /// this one's.
     fn set_output(&self, data: u8) -> Result<()>;
 
-    /// Takes `N` readings of the D0–D7 input lines, one per pulse of `clock`.
+    /// Takes [`SAMPLES`] readings of the D0–D7 input lines, one per pulse of `clock`.
     ///
     /// Each reading is taken before `clock` goes high, so a device that shifts on
     /// the rising edge is sampled once per bit, first bit first. Every line other
     /// than `clock` is held low throughout, and all of them are left low.
-    ///
-    /// On the ABACOM relay board, bit 7 (D7) of each reading carries the A6275
-    /// serial output, which is how the shift register is read back.
-    fn sample_clocked<const N: usize>(&self, clock: u8) -> Result<[u8; N]>;
+    fn sample_clocked(&self, clock: u8) -> Result<[u8; SAMPLES]>;
 }
 
 /// An opened CH341A with its bulk interface claimed.
@@ -185,6 +198,38 @@ impl Ch341a {
 
         expect_transfer_len(read, buf.len())
     }
+
+    /// Discards whatever the device still has queued on the IN endpoint.
+    ///
+    /// A UIO stream's response is queued as the stream runs, so a read that never
+    /// completed leaves those bytes in the endpoint. Nothing else consumes them and
+    /// the next read takes them for its own: from then on every clocked read answers
+    /// with the samples of the call before it. The lengths match, so
+    /// [`expect_transfer_len`] cannot catch it, and the board keeps reporting a state
+    /// it held one call ago until it is reset.
+    ///
+    /// Either half of the round trip can leave it that way, which is why both drain:
+    /// a write that reports the wrong length still put a truncated stream on the
+    /// wire, and the states it did run queued their bytes.
+    ///
+    /// Best effort, on a path that is already failing, so its own errors say nothing
+    /// the caller does not know. Draining *before* a read instead would pay
+    /// [`TIMEOUT_DRAIN`] on every call to find the endpoint empty. Not yet measured
+    /// against real hardware: a process killed between its write and its read leaves
+    /// the endpoint dirty either way, and only [`Ch341a::reset`] clears that.
+    fn drain(&self) {
+        let mut discard = [0u8; PACKET_LENGTH];
+
+        for _ in 0..DRAIN_PACKETS {
+            match self
+                .handle
+                .read_bulk(ENDPOINT_IN, &mut discard, TIMEOUT_DRAIN)
+            {
+                Ok(1..) => continue,
+                _ => break,
+            }
+        }
+    }
 }
 
 impl Gpio for Ch341a {
@@ -197,15 +242,19 @@ impl Gpio for Ch341a {
         self.write(&msg)
     }
 
-    fn sample_clocked<const N: usize>(&self, clock: u8) -> Result<[u8; N]> {
-        const { assert!(N <= MAX_SAMPLES, "a UIO stream must fit one packet") };
+    fn sample_clocked(&self, clock: u8) -> Result<[u8; SAMPLES]> {
+        const { assert!(SAMPLES <= MAX_SAMPLES, "a UIO stream must fit one packet") };
 
-        let (packet, len) = sample_stream(clock, N);
-        self.write(&packet[..len])?;
+        let (packet, len) = sample_stream(clock, SAMPLES);
 
-        // One byte per `UIO_STM_IN`, in the order the stream ran them.
-        let mut samples = [0u8; N];
-        self.read(&mut samples)?;
+        // One byte per `UIO_STM_IN`, in the order the stream ran them. If either
+        // half of that round trip fails, whatever the device queued goes in the bin
+        // rather than to the next read.
+        let mut samples = [0u8; SAMPLES];
+
+        self.write(&packet[..len])
+            .and_then(|()| self.read(&mut samples))
+            .inspect_err(|_| self.drain())?;
 
         Ok(samples)
     }
