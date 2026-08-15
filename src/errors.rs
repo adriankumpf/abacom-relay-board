@@ -20,7 +20,13 @@ pub enum Error {
     #[error("no relay board found")]
     NotFound,
 
-    /// Multiple relay boards were found and no port was specified to disambiguate.
+    /// More than one board answered to the one that was named.
+    ///
+    /// Either no port was given and several boards are attached, or a port *was*
+    /// given and two boards share it: a port number is the port on the parent hub,
+    /// so two hubs can both have a board on port 3. Giving the port again is no
+    /// remedy in that second case: [`Usb::boards`](crate::Usb::boards) names each
+    /// board by its whole path, which cannot collide.
     #[error("multiple relay boards found")]
     MultipleFound,
 

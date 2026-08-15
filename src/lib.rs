@@ -27,8 +27,8 @@
 //! Within a running system the addressing is stable: a port number is physical, so
 //! it survives the re-enumeration a [`Board::reset_device`] causes, where a USB
 //! device address would not. [`Usb::boards`] enumerates in a stable order, and
-//! `arb --list` prints each board in the same `1-1.3` notation `lsusb -t` uses, so
-//! the two can be read side by side.
+//! `arb --list` prints each board as `port 3 (1-1.3)`, carrying the same `1-1.3`
+//! notation `lsusb -t` uses, so the two can be read side by side.
 //!
 //! # Examples
 //!
@@ -235,7 +235,7 @@ impl Board {
     /// # Errors
     ///
     /// * [`Error::NotFound`] — no relay board detected
-    /// * [`Error::MultipleFound`] — multiple boards detected and no port was given
+    /// * [`Error::MultipleFound`] — more than one board answers to this one
     /// * [`Error::Busy`] — another application is talking to the board
     ///
     /// # Example
@@ -278,7 +278,7 @@ impl Board {
     /// # Errors
     ///
     /// * [`Error::NotFound`] — no relay board detected
-    /// * [`Error::MultipleFound`] — multiple boards detected and no port was given
+    /// * [`Error::MultipleFound`] — more than one board answers to this one
     /// * [`Error::Busy`] — another application is talking to the board
     /// * [`Error::SelfTestFailed`] — the test pattern did not survive the round trip
     pub fn self_test(&self) -> Result<()> {
@@ -296,7 +296,7 @@ impl Board {
     /// # Errors
     ///
     /// * [`Error::NotFound`] — no relay board detected
-    /// * [`Error::MultipleFound`] — multiple boards detected and no port was given
+    /// * [`Error::MultipleFound`] — more than one board answers to this one
     /// * [`Error::Busy`] — another application is talking to the board
     /// * [`Error::VerificationFailed`] — the read-back did not match `relays`
     ///
@@ -323,7 +323,7 @@ impl Board {
     /// # Errors
     ///
     /// * [`Error::NotFound`] — no relay board detected
-    /// * [`Error::MultipleFound`] — multiple boards detected and no port was given
+    /// * [`Error::MultipleFound`] — more than one board answers to this one
     /// * [`Error::Busy`] — another application is talking to the board
     pub fn reset_device(&self) -> Result<()> {
         self.claim()?.reset()
@@ -335,9 +335,9 @@ impl Board {
     }
 }
 
-/// Names which board this is: `port 3 (bus 1, path 1.3)` for one from
-/// [`Usb::boards`], which tells apart two boards sharing a port number, `port 3` for
-/// `usb.board(Some(3))`, and `any board` for `usb.board(None)`.
+/// Names which board this is: `port 3 (1-1.3)` for one from [`Usb::boards`], which
+/// tells apart two boards sharing a port number, `port 3` for `usb.board(Some(3))`,
+/// and `any board` for `usb.board(None)`.
 impl fmt::Display for Board {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.select.fmt(f)

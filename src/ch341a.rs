@@ -5,7 +5,7 @@
 //! - `ENDPOINT_IN` (0x82): device-to-host responses
 //!
 //! Two commands are used:
-//! - `0xA1` (set output): sets the state of the D0–D7 GPIO lines, one transfer per
+//! - `0xA1` (set output): sets the state of the D0–D5 GPIO lines, one transfer per
 //!   line change
 //! - `0xAB` (UIO stream): runs a short program of pin states, so that reading a
 //!   whole shift register — sample, clock, sample, … — costs one transfer out and
@@ -114,12 +114,11 @@ pub fn is_ch341a(device: &Device) -> Result<bool> {
 /// so keeping it behind a trait lets the shift register protocol be exercised
 /// against a simulated A6275 instead of real hardware.
 pub trait Gpio {
-    /// Sets the D0–D7 output lines to `data`.
+    /// Sets the output lines to `data`, one line per bit.
     ///
-    /// Each bit in `data` corresponds to one GPIO line. On the ABACOM relay board:
-    /// - Bit 0 (0x01): A6275 LATCH
-    /// - Bit 3 (0x08): A6275 CLK
-    /// - Bit 5 (0x20): A6275 Serial DATA in
+    /// Only D0–D5 are driven (see [`OUTPUT_LINES`]), so bits 6 and 7 of `data`
+    /// change nothing. Which line does what is the protocol layer's business, not
+    /// this one's.
     fn set_output(&self, data: u8) -> Result<()>;
 
     /// Takes `N` readings of the D0–D7 input lines, one per pulse of `clock`.
@@ -127,9 +126,6 @@ pub trait Gpio {
     /// Each reading is taken before `clock` goes high, so a device that shifts on
     /// the rising edge is sampled once per bit, first bit first. Every line other
     /// than `clock` is held low throughout, and all of them are left low.
-    ///
-    /// On the ABACOM relay board, bit 7 (D7) of each reading carries the A6275
-    /// serial output, which is how the shift register is read back.
     fn sample_clocked<const N: usize>(&self, clock: u8) -> Result<[u8; N]>;
 }
 

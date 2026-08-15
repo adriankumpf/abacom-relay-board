@@ -151,6 +151,12 @@ Code holding raw masks converts at the boundary with `Relays::from_bits(u8)` and
   read shifted in — so a failure made the *next* read disagree with the latched
   outputs, on exactly the board already suspected of misreporting. No relay moved
   either way
+- Correct three pieces of documentation that would send a consumer's recovery the
+  wrong way: `Error::MultipleFound` said it meant no port was given, when a port
+  that two hubs both have a board on produces it as well (and supplying the port
+  again cannot help, `Usb::boards` can); `Display for Board` documented a format
+  it does not render; and `Gpio::set_output` claimed to drive D0–D7 when the
+  direction mask makes D6 and D7 inputs
 - Correct a wrong relay bitmask in a documentation example
 - Raise the USB bulk timeouts to 1000 ms, from 10 ms for reads and 100 ms for
   writes. Ten milliseconds for a USB round trip is tight enough to fail
