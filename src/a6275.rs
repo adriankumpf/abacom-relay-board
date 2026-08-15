@@ -125,13 +125,14 @@ impl<T: Gpio> A6275<T> {
         Ok(status)
     }
 
-    /// Checks that a test pattern survives the round trip through the shift register.
+    /// Checks that a test pattern survives the round trip through the shift register,
+    /// and returns the contents it found there.
     ///
     /// Writes the complement of the register's current contents without latching, so
     /// the relay outputs are never touched, reads it back and puts the original
     /// contents back on every path out, so that neither a failed check nor a failed
     /// transfer leaves the register disagreeing with the latched outputs.
-    pub fn self_test(&self) -> Result<()> {
+    pub fn self_test(&self) -> Result<u8> {
         let status = self.read_shift_register().map_err(Error::out_of_sync)?;
         let test_status = !status;
 
@@ -144,7 +145,7 @@ impl<T: Gpio> A6275<T> {
             return Err(Error::SelfTestFailed);
         }
 
-        Ok(())
+        Ok(status)
     }
 }
 
@@ -494,6 +495,16 @@ mod tests {
         // relays, and it is the read path the mismatch implicates.
         assert_eq!(board.gpio.0.register.get(), 0b1000_0001);
         assert_eq!(board.gpio.0.outputs.get(), 0b1000_0001);
+    }
+
+    #[test]
+    fn the_self_test_reports_the_relays_it_found() {
+        let board = fake();
+        board.set_status(0b1100_1001, Verify::Disabled).unwrap();
+
+        // Read inside the same claim as the check, so a caller can print a state
+        // the check has just vouched for instead of reading the board again.
+        assert_eq!(board.self_test().unwrap(), 0b1100_1001);
     }
 
     #[test]

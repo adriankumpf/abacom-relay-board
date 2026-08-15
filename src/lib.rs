@@ -255,18 +255,22 @@ impl Board {
         A6275::new(self.claim()?).status().map(Relays::from_bits)
     }
 
-    /// Checks that the board answers correctly, without moving any relay.
+    /// Checks that the board answers correctly, without moving any relay, and
+    /// returns the relays it found active.
     ///
     /// Writes an inverted test pattern to the shift register and reads it back. The
     /// pattern is never latched and the register's original contents are put back
-    /// afterwards, so this is safe to call on a board driving live outputs.
+    /// afterwards, so this is safe to call on a board driving live outputs. Those
+    /// contents are what it returns: the check has to read them before it can write
+    /// anything, so a caller that wants both a verdict and a state gets them from
+    /// one claim rather than following this with [`relays`](Board::relays).
     ///
     /// A diagnostic, not a guard on the operating path. [`Board::set_relays`] with
     /// [`Verify::Enabled`] already writes, latches, reads back and compares within
     /// a single claim — that covers everything this covers, on the value the caller
     /// actually asked for, plus the latch this deliberately never touches. And
-    /// because a `self_test` is its own claim, it vouches for no particular
-    /// [`relays`](Board::relays) call before or after it.
+    /// because a `self_test` is its own claim, it vouches for no other
+    /// [`relays`](Board::relays) call, only for the state it hands back itself.
     ///
     /// So reach for it where a person or a monitor is asking "is this board still
     /// healthy?" — at startup, from a health check, or when a board is suspect —
@@ -285,8 +289,8 @@ impl Board {
     /// * [`Error::SelfTestFailed`] — the test pattern did not survive the round trip
     /// * [`Error::RegisterOutOfSync`] — the check was interrupted and could not put
     ///   the register's contents back
-    pub fn self_test(&self) -> Result<()> {
-        A6275::new(self.claim()?).self_test()
+    pub fn self_test(&self) -> Result<Relays> {
+        A6275::new(self.claim()?).self_test().map(Relays::from_bits)
     }
 
     /// Activates `relays`, deactivating every relay not in the set.

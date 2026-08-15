@@ -136,7 +136,10 @@ Code holding raw masks converts at the boundary with `Relays::from_bits(u8)` and
   A diagnostic rather than a guard on the operating path: `set_relays` with
   `Verify::Enabled` already covers the same ground inside one claim, and on the
   value the caller actually asked for, so reach for `self_test()` at startup,
-  from a health check, or when a board is suspect
+  from a health check, or when a board is suspect. It returns the `Relays` it
+  found on its way past, because the check has to read the register before it can
+  write anything: a caller wanting both a verdict and a state gets them from one
+  claim, which is what `arb --status` now does instead of claiming the board twice
 - `Error::InvalidRelay` for relay numbers outside 1–8
 - `Error::RegisterOutOfSync`, for a read that could not put the shift register
   back. Reading the A6275 is destructive, so every read writes back what it read;
