@@ -37,6 +37,36 @@ struct Args {
     relays: Vec<u8>,
 }
 
+/// What an invocation asks for, which is exactly one thing.
+///
+/// The only place the flags are read as modes, so the dispatch and the "no mode
+/// given, print the help" branch cannot drift apart.
+#[derive(Debug, PartialEq)]
+enum Mode {
+    Status,
+    List,
+    Reset,
+    Relays,
+}
+
+impl Args {
+    /// The mode given, if any. The `mode` group makes them mutually exclusive, so a
+    /// parsed `Args` names at most one.
+    fn mode(&self) -> Option<Mode> {
+        if self.status {
+            Some(Mode::Status)
+        } else if self.list {
+            Some(Mode::List)
+        } else if self.reset {
+            Some(Mode::Reset)
+        } else if !self.relays.is_empty() {
+            Some(Mode::Relays)
+        } else {
+            None
+        }
+    }
+}
+
 fn main() {
     if let Err(e) = run() {
         eprintln!("arb: {e}");
@@ -64,55 +94,51 @@ fn requested_relays(numbers: &[u8]) -> arb::Result<Relays> {
 fn run() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
-    if !args.status && !args.list && !args.reset && args.relays.is_empty() {
+    let Some(mode) = args.mode() else {
         Args::command().print_help()?;
         std::process::exit(2);
-    }
+    };
 
     // After the help branch: initialising libusb here would make a bare `arb`
     // fail with a USB error instead of printing its help.
     let usb = arb::Usb::new()?;
 
-    if args.list {
-        // No board prints nothing rather than erroring, so the output stays
-        // something a script can read line by line.
-        for board in usb.boards()? {
-            writeln!(io::stdout(), "{board}")?;
-        }
-
-        return Ok(());
-    }
-
     let board = usb.board(args.port);
 
-    if args.status {
-        // The library keeps the check off the read path for callers that read
-        // thousands of times; a one-shot CLI is the opposite case. It pays another
-        // ~2.3 ms on top of the ~6.5 ms this process already spent initialising
-        // libusb, and printing state that a flaky board invented is exactly the
-        // failure a person reading it wants caught.
-        board.self_test()?;
+    match mode {
+        Mode::List => {
+            // No board prints nothing rather than erroring, so the output stays
+            // something a script can read line by line.
+            for found in usb.boards()? {
+                writeln!(io::stdout(), "{found}")?;
+            }
+        }
 
-        let relays = board.relays()?;
+        Mode::Status => {
+            // The library keeps the check off the read path for callers that read
+            // thousands of times; a one-shot CLI is the opposite case. It pays
+            // another ~2.3 ms on top of the ~6.5 ms this process already spent
+            // initialising libusb, and printing state that a flaky board invented is
+            // exactly the failure a person reading it wants caught.
+            board.self_test()?;
 
-        writeln!(io::stdout(), "Active relays: {relays}")?;
+            let relays = board.relays()?;
 
-        return Ok(());
+            writeln!(io::stdout(), "Active relays: {relays}")?;
+        }
+
+        Mode::Reset => board.reset_device()?,
+
+        Mode::Relays => {
+            let verify = if args.disable_verification {
+                Verify::Disabled
+            } else {
+                Verify::Enabled
+            };
+
+            board.set_relays(requested_relays(&args.relays)?, verify)?;
+        }
     }
-
-    if args.reset {
-        board.reset_device()?;
-
-        return Ok(());
-    }
-
-    let verify = if args.disable_verification {
-        Verify::Disabled
-    } else {
-        Verify::Enabled
-    };
-
-    board.set_relays(requested_relays(&args.relays)?, verify)?;
 
     Ok(())
 }
@@ -214,6 +240,41 @@ mod tests {
     #[test]
     fn reset_conflicts_with_disable_verification() {
         assert!(parse(&["--reset", "-d"]).is_err());
+    }
+
+    #[test]
+    fn every_flag_names_the_mode_it_runs() {
+        assert_eq!(parse(&["--status"]).unwrap().mode(), Some(Mode::Status));
+        assert_eq!(parse(&["--list"]).unwrap().mode(), Some(Mode::List));
+        assert_eq!(parse(&["--reset"]).unwrap().mode(), Some(Mode::Reset));
+        assert_eq!(parse(&["1", "2"]).unwrap().mode(), Some(Mode::Relays));
+        assert_eq!(parse(&["0"]).unwrap().mode(), Some(Mode::Relays));
+    }
+
+    #[test]
+    fn an_invocation_without_a_mode_names_none() {
+        // What makes a bare `arb` print its help, and `--port` alone with it: a
+        // modifier is not a mode.
+        assert_eq!(parse(&[]).unwrap().mode(), None);
+        assert_eq!(parse(&["--port", "3"]).unwrap().mode(), None);
+    }
+
+    #[test]
+    fn the_mode_group_holds_exactly_the_flags_mode_reads() {
+        // `mode()` and the `ArgGroup` name the modes independently, and nothing makes
+        // them agree: a mode added to one and not the other still compiles. Forgetting
+        // the group is the silent half — two modes would then parse together and the
+        // first-match-wins chain would drop one without a word.
+        let command = Args::command();
+        let group = command
+            .get_groups()
+            .find(|group| group.get_id() == "mode")
+            .expect("the mode group");
+
+        let mut ids: Vec<_> = group.get_args().map(|id| id.as_str()).collect();
+        ids.sort_unstable();
+
+        assert_eq!(ids, ["list", "relays", "reset", "status"]);
     }
 
     fn requested(numbers: &[u8]) -> Relays {
